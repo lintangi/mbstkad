@@ -1,0 +1,1311 @@
+import React, { createContext, useContext, useState, useEffect } from 'react';
+import {
+  Question,
+  User,
+  UserRole,
+  AuditLog,
+  AppNotification,
+  CategoryMetadata,
+  ReviewCriteriaRating,
+  AppTab,
+  QuestionType,
+  QuestionStatus,
+  DifficultyLevel,
+  ChoiceOption,
+} from '../types';
+import {
+  INITIAL_QUESTIONS,
+  INITIAL_USERS,
+  INITIAL_CATEGORIES,
+  INITIAL_AUDIT_LOGS,
+  INITIAL_NOTIFICATIONS,
+} from '../data/initialData';
+
+interface AppContextType {
+  // Auth & Current User
+  isAuthenticated: boolean;
+  currentUser: User;
+  setCurrentUser: (user: User) => void;
+  login: (email: string, password?: string) => { success: boolean; message: string };
+  logout: () => void;
+  
+  // Dark Mode Theme
+  theme: 'light' | 'dark';
+  toggleTheme: () => void;
+
+  // Users CRUD
+  users: User[];
+  addUser: (data: Omit<User, 'id'>) => User;
+  updateUser: (id: string, data: Partial<User>) => void;
+  deleteUser: (id: string) => { success: boolean; message: string };
+
+  // Data Collections
+  questions: Question[];
+  categories: CategoryMetadata[];
+  auditLogs: AuditLog[];
+  notifications: AppNotification[];
+
+  // Navigation & Role Menus
+  activeTab: AppTab;
+  setActiveTab: (tab: AppTab) => void;
+  getAllowedTabs: (role: UserRole) => AppTab[];
+
+  // Selection & Modal States
+  selectedQuestionId: string | null;
+  setSelectedQuestionId: (id: string | null) => void;
+  reviewingQuestionId: string | null;
+  setReviewingQuestionId: (id: string | null) => void;
+  editingQuestionId: string | null;
+  setEditingQuestionId: (id: string | null) => void;
+
+  // Question Actions
+  createQuestion: (data: Partial<Question>, submitDirectly: boolean) => Question;
+  updateQuestion: (id: string, data: Partial<Question>, submitForReview: boolean) => void;
+  recallQuestion: (id: string) => void;
+  duplicateQuestion: (id: string) => void;
+  deleteQuestion: (id: string) => void;
+  
+  // Review Actions
+  submitReview: (
+    questionId: string,
+    decision: 'approve' | 'reject' | 'request_changes',
+    criteria: ReviewCriteriaRating,
+    generalComment: string,
+    optionComments?: Record<string, string>
+  ) => void;
+
+  // Categories & Config Actions
+  addCategory: (cat: CategoryMetadata) => void;
+  updateCategory: (id: string, cat: Partial<CategoryMetadata>) => void;
+  deleteCategory: (id: string) => void;
+
+  // Notification Actions
+  markNotificationRead: (id: string) => void;
+  markAllNotificationsRead: () => void;
+  
+  // GAS & Sheets Integration State
+  spreadsheetId: string;
+  setSpreadsheetId: (id: string) => void;
+  autoSyncEnabled: boolean;
+  setAutoSyncEnabled: (enabled: boolean) => void;
+  gasWebhookUrl: string;
+  setGasWebhookUrl: (url: string) => void;
+  lastGasSyncTime: string | null;
+  isSyncing: boolean;
+  syncStatus: 'idle' | 'syncing' | 'success' | 'error';
+  syncMessage: string | null;
+  syncWithGoogleSheets: (options?: { silent?: boolean }) => Promise<{ success: boolean; message: string }>;
+  pullFromGoogleSheets: () => Promise<{ success: boolean; message: string; count?: number }>;
+
+  // Sidebar State for Mobile/Tablet
+  isSidebarMinimized: boolean;
+  setIsSidebarMinimized: React.Dispatch<React.SetStateAction<boolean>>;
+  toggleSidebarMinimized: () => void;
+  isMobileSidebarOpen: boolean;
+  setIsMobileSidebarOpen: React.Dispatch<React.SetStateAction<boolean>>;
+  toggleMobileSidebar: () => void;
+}
+
+const AppContext = createContext<AppContextType | undefined>(undefined);
+
+const STORAGE_KEY_AUTH = 'tkad_auth_v3';
+const STORAGE_KEY_USER_ID = 'tkad_user_id_v3';
+const STORAGE_KEY_THEME = 'tkad_theme_v3';
+const STORAGE_KEY_USERS = 'tkad_users_v3';
+const STORAGE_KEY_QUESTIONS = 'tkad_questions_v3';
+const STORAGE_KEY_LOGS = 'tkad_logs_v3';
+const STORAGE_KEY_NOTIFS = 'tkad_notifs_v3';
+const STORAGE_KEY_CATEGORIES = 'tkad_categories_v3';
+const STORAGE_KEY_GAS_URL = 'tkad_gas_url_v3';
+const STORAGE_KEY_SPREADSHEET_ID = 'tkad_spreadsheet_id_v3';
+const STORAGE_KEY_AUTOSYNC = 'tkad_autosync_v3';
+
+export const DEFAULT_SPREADSHEET_ID = '1YSDHUR9CYgLHPGtFVUxQeCgcH51GdR-P9fqehUUnMK4';
+export const DEFAULT_GAS_URL = 'https://script.google.com/macros/s/AKfycbx9JoUcWeUq7JxS6Ab1MY0Bu4lbrZdxC1RmSy9rYzVPqJQfqQDkwkZ9mEiXJNBLBRC2Jg/exec';
+
+const PREV_DEFAULT_SPREADSHEET_ID = '1LbXmt8Ve2TrnNRzcgpLWfcRaW1au2GHWG4LnCtupDT8';
+const PREV_DEFAULT_GAS_URLS = [
+  'https://script.google.com/macros/s/AKfycbw36Wln_iwfSLtYvUD8YutEMFgW5KEjbfAaITXXhiDL_EZHpcO8NIDtePHRrFA3Ws4l/exec',
+  'https://script.google.com/macros/s/AKfycbzLi3eycowg1aaWsMN6_vN6zQ9L51kUdIi1_hkqxN26IPOPn0dUqHF5kNDiVNUyKjFfjA/exec',
+];
+
+// Helper to parse Google Sheets Visualization API table rows into Question objects
+function parseGvizTableToQuestions(table: any): Question[] {
+  if (!table || !Array.isArray(table.rows)) return [];
+  const questions: Question[] = [];
+
+  table.rows.forEach((r: any, idx: number) => {
+    if (!r || !Array.isArray(r.c)) return;
+    const getVal = (i: number): string => {
+      const cell = r.c[i];
+      if (!cell) return '';
+      return cell.v !== undefined && cell.v !== null ? String(cell.v) : (cell.f || '');
+    };
+
+    const id = getVal(0);
+    // Ignore header row if accidentally captured
+    if (!id || id.toLowerCase() === 'id' || id.toLowerCase() === 'kode') return;
+
+    const code = getVal(1) || `TKAD-SOAL-${idx + 1}`;
+    const subtest = getVal(2) || 'Bahasa Indonesia';
+    const topic = getVal(3) || 'Umum';
+    const typeStr = (getVal(4) || 'pilihan_ganda').toLowerCase();
+    const type = (['pilihan_ganda', 'pilihan_ganda_kompleks', 'benar_salah', 'menjodohkan', 'isian_singkat', 'esai'].includes(typeStr)
+      ? typeStr
+      : 'pilihan_ganda') as QuestionType;
+    const diffStr = (getVal(5) || 'sedang').toLowerCase();
+    const difficulty = (['mudah', 'sedang', 'sulit'].includes(diffStr) ? diffStr : 'sedang') as DifficultyLevel;
+    const defaultScore = Number(getVal(6)) || 4;
+    const prompt = getVal(7) || 'Soal';
+
+    let options: ChoiceOption[] | undefined;
+    const rawOptions = getVal(8);
+    if (rawOptions) {
+      try {
+        const parsed = JSON.parse(rawOptions);
+        if (Array.isArray(parsed)) {
+          options = parsed;
+        }
+      } catch {}
+    }
+
+    const explanation = getVal(9);
+    const statusStr = (getVal(10) || 'disetujui').toLowerCase();
+    const status = (['draft', 'menunggu_review', 'disetujui', 'perlu_revisi', 'ditolak'].includes(statusStr)
+      ? statusStr
+      : 'disetujui') as QuestionStatus;
+    const version = getVal(11) || '1.0';
+    const createdByName = getVal(12) || 'Yusril';
+    const createdAt = getVal(13) || new Date().toISOString();
+    const updatedAt = getVal(14) || new Date().toISOString();
+
+    questions.push({
+      id,
+      code,
+      subtest,
+      topic,
+      type,
+      difficulty,
+      defaultScore,
+      prompt,
+      options: options || [
+        { id: 'opt-1', label: 'A', text: 'Pilihan A', isCorrect: true },
+        { id: 'opt-2', label: 'B', text: 'Pilihan B', isCorrect: false },
+        { id: 'opt-3', label: 'C', text: 'Pilihan C', isCorrect: false },
+        { id: 'opt-4', label: 'D', text: 'Pilihan D', isCorrect: false },
+      ],
+      explanation,
+      status,
+      version,
+      createdByName,
+      createdById: 'usr-admin-yusril',
+      createdAt,
+      updatedAt,
+      tags: [],
+      attachments: [],
+      reviews: [],
+      versions: [],
+    });
+  });
+
+  return questions;
+}
+
+// Helper to merge imported questions with local questions without duplicates
+function mergeQuestions(local: Question[], incoming: Question[]): Question[] {
+  const map = new Map<string, Question>();
+  local.forEach((q) => map.set(q.id, q));
+  incoming.forEach((q) => map.set(q.id, q));
+  return Array.from(map.values());
+}
+
+// Immediately cleanup legacy mock keys so old sample data does not linger
+try {
+  [
+    'tkad_users_v2',
+    'tkad_questions_v2',
+    'tkad_logs_v2',
+    'tkad_notifs_v2',
+    'tkad_users',
+    'tkad_questions',
+    'tkad_logs',
+    'tkad_auth_v2',
+    'tkad_user_id_v2'
+  ].forEach((k) => localStorage.removeItem(k));
+} catch {
+  // Ignore in environments without window/localStorage
+}
+
+export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  // Theme State
+  const [theme, setTheme] = useState<'light' | 'dark'>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY_THEME);
+      if (saved === 'dark' || saved === 'light') return saved;
+      return window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    } catch {
+      return 'light';
+    }
+  });
+
+  // Apply dark class to documentElement
+  useEffect(() => {
+    try {
+      if (theme === 'dark') {
+        document.documentElement.classList.add('dark');
+      } else {
+        document.documentElement.classList.remove('dark');
+      }
+      localStorage.setItem(STORAGE_KEY_THEME, theme);
+    } catch (e) {
+      console.warn('Theme update error', e);
+    }
+  }, [theme]);
+
+  const toggleTheme = () => {
+    setTheme((prev) => (prev === 'light' ? 'dark' : 'light'));
+  };
+
+  // Users State - ensuring haloyusril is always present
+  const [users, setUsers] = useState<User[]>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY_USERS);
+      if (saved) {
+        const parsed: User[] = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.some((u) => u.email === 'haloyusril@tkad.adiwerna')) {
+          return parsed;
+        }
+      }
+      return INITIAL_USERS;
+    } catch {
+      return INITIAL_USERS;
+    }
+  });
+
+  // Auth State
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => {
+    try {
+      const savedAuth = localStorage.getItem(STORAGE_KEY_AUTH);
+      return savedAuth === 'true';
+    } catch {
+      return false;
+    }
+  });
+
+  const [currentUser, setCurrentUser] = useState<User>(() => {
+    try {
+      const savedId = localStorage.getItem(STORAGE_KEY_USER_ID);
+      const found = users.find((u) => u.id === savedId) || users.find((u) => u.email === 'haloyusril@tkad.adiwerna');
+      return found || INITIAL_USERS[0];
+    } catch {
+      return INITIAL_USERS[0];
+    }
+  });
+
+  // Navigation State
+  const [activeTab, setActiveTab] = useState<AppTab>('dashboard');
+
+  // Mobile / Tablet Sidebar State
+  const [isSidebarMinimized, setIsSidebarMinimized] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('tkad_sidebar_minimized') === 'true';
+    } catch {
+      return false;
+    }
+  });
+
+  const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState<boolean>(false);
+
+  const toggleSidebarMinimized = () => {
+    setIsSidebarMinimized((prev) => {
+      const next = !prev;
+      try {
+        localStorage.setItem('tkad_sidebar_minimized', String(next));
+      } catch {}
+      return next;
+    });
+  };
+
+  const toggleMobileSidebar = () => {
+    setIsMobileSidebarOpen((prev) => !prev);
+  };
+
+  const [selectedQuestionId, setSelectedQuestionId] = useState<string | null>(null);
+  const [reviewingQuestionId, setReviewingQuestionId] = useState<string | null>(null);
+  const [editingQuestionId, setEditingQuestionId] = useState<string | null>(null);
+
+  // Initialize Data from LocalStorage (starts clean with zero questions)
+  const [questions, setQuestions] = useState<Question[]>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY_QUESTIONS);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) return parsed;
+      }
+      return INITIAL_QUESTIONS;
+    } catch {
+      return INITIAL_QUESTIONS;
+    }
+  });
+
+  const [categories, setCategories] = useState<CategoryMetadata[]>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY_CATEGORIES);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+      return INITIAL_CATEGORIES;
+    } catch {
+      return INITIAL_CATEGORIES;
+    }
+  });
+
+  const [auditLogs, setAuditLogs] = useState<AuditLog[]>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY_LOGS);
+      return saved ? JSON.parse(saved) : INITIAL_AUDIT_LOGS;
+    } catch {
+      return INITIAL_AUDIT_LOGS;
+    }
+  });
+
+  const [notifications, setNotifications] = useState<AppNotification[]>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY_NOTIFS);
+      return saved ? JSON.parse(saved) : INITIAL_NOTIFICATIONS;
+    } catch {
+      return INITIAL_NOTIFICATIONS;
+    }
+  });
+
+  const [gasWebhookUrl, setGasWebhookUrl] = useState<string>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY_GAS_URL);
+      if (!saved || saved.trim() === '' || PREV_DEFAULT_GAS_URLS.includes(saved)) {
+        return DEFAULT_GAS_URL;
+      }
+      return saved;
+    } catch {
+      return DEFAULT_GAS_URL;
+    }
+  });
+  const [spreadsheetId, setSpreadsheetId] = useState<string>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY_SPREADSHEET_ID);
+      if (!saved || saved.trim() === '' || saved === PREV_DEFAULT_SPREADSHEET_ID) {
+        return DEFAULT_SPREADSHEET_ID;
+      }
+      return saved;
+    } catch {
+      return DEFAULT_SPREADSHEET_ID;
+    }
+  });
+  const [autoSyncEnabled, setAutoSyncEnabled] = useState<boolean>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY_AUTOSYNC);
+      return saved !== null ? saved === 'true' : true;
+    } catch {
+      return true;
+    }
+  });
+  const [isSyncing, setIsSyncing] = useState<boolean>(false);
+  const [syncStatus, setSyncStatus] = useState<'idle' | 'syncing' | 'success' | 'error'>('idle');
+  const [syncMessage, setSyncMessage] = useState<string | null>(null);
+  const [lastGasSyncTime, setLastGasSyncTime] = useState<string | null>(null);
+
+  // Sync to local storage
+  useEffect(() => {
+    try {
+      localStorage.setItem(STORAGE_KEY_SPREADSHEET_ID, spreadsheetId);
+    } catch (e) {
+      console.warn(e);
+    }
+  }, [spreadsheetId]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(STORAGE_KEY_AUTOSYNC, String(autoSyncEnabled));
+    } catch (e) {
+      console.warn(e);
+    }
+  }, [autoSyncEnabled]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(STORAGE_KEY_GAS_URL, gasWebhookUrl);
+    } catch (e) {
+      console.warn(e);
+    }
+  }, [gasWebhookUrl]);
+
+  // Sync to local storage
+  useEffect(() => {
+    try {
+      localStorage.setItem(STORAGE_KEY_USERS, JSON.stringify(users));
+    } catch (e) {
+      console.warn(e);
+    }
+  }, [users]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(STORAGE_KEY_QUESTIONS, JSON.stringify(questions));
+    } catch (e) {
+      console.warn(e);
+    }
+  }, [questions]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(STORAGE_KEY_LOGS, JSON.stringify(auditLogs));
+    } catch (e) {
+      console.warn(e);
+    }
+  }, [auditLogs]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(STORAGE_KEY_NOTIFS, JSON.stringify(notifications));
+    } catch (e) {
+      console.warn(e);
+    }
+  }, [notifications]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(STORAGE_KEY_CATEGORIES, JSON.stringify(categories));
+    } catch (e) {
+      console.warn(e);
+    }
+  }, [categories]);
+
+  useEffect(() => {
+    localStorage.setItem(STORAGE_KEY_GAS_URL, gasWebhookUrl);
+  }, [gasWebhookUrl]);
+
+  useEffect(() => {
+    if (isAuthenticated) {
+      localStorage.setItem(STORAGE_KEY_AUTH, 'true');
+      localStorage.setItem(STORAGE_KEY_USER_ID, currentUser.id);
+    } else {
+      localStorage.removeItem(STORAGE_KEY_AUTH);
+      localStorage.removeItem(STORAGE_KEY_USER_ID);
+    }
+  }, [isAuthenticated, currentUser]);
+
+  // Allowed Tabs based on user role
+  const getAllowedTabs = (role: UserRole): AppTab[] => {
+    switch (role) {
+      case 'pembuat':
+        return ['dashboard', 'bank_soal', 'buat_soal'];
+      case 'reviewer':
+        return ['dashboard', 'antrian_review', 'bank_soal'];
+      case 'admin':
+        return [
+          'dashboard',
+          'bank_soal',
+          'buat_soal',
+          'antrian_review',
+          'audit_log',
+          'manajemen_pengguna',
+          'pengaturan',
+          'gas_sync',
+        ];
+      default:
+        return ['dashboard', 'bank_soal'];
+    }
+  };
+
+  // When user role changes or tab is not allowed, route to dashboard
+  useEffect(() => {
+    const allowed = getAllowedTabs(currentUser.role);
+    if (!allowed.includes(activeTab)) {
+      setActiveTab('dashboard');
+    }
+  }, [currentUser.role, activeTab]);
+
+  const addAuditLog = (
+    action: AuditLog['action'],
+    description: string,
+    questionId?: string,
+    questionCode?: string,
+    details?: AuditLog['details']
+  ) => {
+    const newLog: AuditLog = {
+      id: `log-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
+      timestamp: new Date().toISOString(),
+      userId: currentUser.id,
+      userName: currentUser.name,
+      userRole: currentUser.role,
+      action,
+      questionId,
+      questionCode,
+      description,
+      details,
+    };
+    setAuditLogs((prev) => [newLog, ...prev]);
+  };
+
+  const addNotification = (
+    userId: string,
+    title: string,
+    message: string,
+    type: AppNotification['type'],
+    questionId?: string
+  ) => {
+    const newNotif: AppNotification = {
+      id: `notif-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
+      timestamp: new Date().toISOString(),
+      userId,
+      title,
+      message,
+      type,
+      read: false,
+      questionId,
+    };
+    setNotifications((prev) => [newNotif, ...prev]);
+  };
+
+  // Auth Operations
+  const login = (email: string, password?: string) => {
+    const trimmed = email.trim().toLowerCase();
+    const user = users.find((u) => u.email.toLowerCase() === trimmed);
+
+    if (!user) {
+      return {
+        success: false,
+        message: 'Pengguna dengan email tersebut tidak ditemukan dalam sistem.',
+      };
+    }
+
+    if (user.status === 'nonaktif') {
+      return {
+        success: false,
+        message: 'Akun ini berstatus nonaktif. Silakan hubungi Administrator.',
+      };
+    }
+
+    // Optional password verification
+    if (password && user.password && user.password !== password) {
+      return {
+        success: false,
+        message: 'Kata sandi tidak sesuai. Silakan coba kembali.',
+      };
+    }
+
+    setCurrentUser(user);
+    setIsAuthenticated(true);
+    addAuditLog('LOGIN', `Pengguna ${user.name} berhasil masuk sebagai ${user.role.toUpperCase()}`);
+    return { success: true, message: `Selamat datang, ${user.name}!` };
+  };
+
+  const logout = () => {
+    addAuditLog('LOGOUT', `Pengguna ${currentUser.name} keluar dari sistem.`);
+    setIsAuthenticated(false);
+  };
+
+  // User Management CRUD
+  const addUser = (userData: Omit<User, 'id'>): User => {
+    const initials = userData.name
+      .split(' ')
+      .map((w) => w[0])
+      .join('')
+      .slice(0, 2)
+      .toUpperCase();
+
+    const newUser: User = {
+      ...userData,
+      id: `usr-${Date.now()}`,
+      avatar: userData.avatar || initials,
+      status: userData.status || 'aktif',
+      password: userData.password || 'password123',
+      createdAt: new Date().toISOString(),
+    };
+
+    setUsers((prev) => [newUser, ...prev]);
+    addAuditLog('CREATE_USER', `Administrator menambahkan pengguna baru: ${newUser.name} (${newUser.role.toUpperCase()})`);
+    return newUser;
+  };
+
+  const updateUser = (id: string, data: Partial<User>) => {
+    setUsers((prev) =>
+      prev.map((u) => {
+        if (u.id !== id) return u;
+        const updated = { ...u, ...data };
+        if (currentUser.id === id) {
+          setCurrentUser(updated);
+        }
+        return updated;
+      })
+    );
+    addAuditLog('UPDATE_USER', `Administrator memperbarui data pengguna ID: ${id}`);
+  };
+
+  const deleteUser = (id: string): { success: boolean; message: string } => {
+    if (currentUser.id === id) {
+      return {
+        success: false,
+        message: 'Tidak dapat menghapus akun yang sedang Anda gunakan untuk login saat ini.',
+      };
+    }
+
+    const target = users.find((u) => u.id === id);
+    if (!target) {
+      return { success: false, message: 'Pengguna tidak ditemukan.' };
+    }
+
+    setUsers((prev) => prev.filter((u) => u.id !== id));
+    addAuditLog('DELETE_USER', `Administrator menghapus pengguna: ${target.name} (${target.email})`);
+    return { success: true, message: `Pengguna ${target.name} berhasil dihapus.` };
+  };
+
+  // Question CRUD & Workflows
+  const createQuestion = (data: Partial<Question>, submitDirectly: boolean): Question => {
+    const newId = `q-${Date.now()}`;
+    const subtestPrefix = data.subtest === 'Bahasa Indonesia' ? 'BIN' : data.subtest === 'Matematika' ? 'MAT' : 'IPA';
+    const randNum = Math.floor(100 + Math.random() * 900);
+    const code = data.code || `TKAD-${subtestPrefix}-${randNum}`;
+
+    const newQuestion: Question = {
+      id: newId,
+      code,
+      type: data.type || 'pilihan_ganda',
+      status: submitDirectly ? 'menunggu_review' : 'draft',
+      subtest: data.subtest || 'Bahasa Indonesia',
+      topic: data.topic || 'Umum',
+      difficulty: data.difficulty || 'sedang',
+      tags: data.tags || ['tkad'],
+      defaultScore: data.defaultScore || 4,
+      prompt: data.prompt || '',
+      explanation: data.explanation || '',
+      attachments: data.attachments || [],
+      options: data.options || [],
+      matchingPairs: data.matchingPairs || [],
+      trueFalseItems: data.trueFalseItems || [],
+      shortAnswerKey: data.shortAnswerKey || '',
+      essayRubric: data.essayRubric || '',
+      createdById: currentUser.id,
+      createdByName: currentUser.name,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      version: '1.0',
+      reviews: [],
+      versions: [
+        {
+          versionNumber: '1.0',
+          timestamp: new Date().toISOString(),
+          modifiedBy: currentUser.name,
+          changeSummary: submitDirectly ? 'Pembuatan awal dan langsung submit review' : 'Pembuatan draf soal',
+          snapshot: {
+            prompt: data.prompt,
+            status: submitDirectly ? 'menunggu_review' : 'draft',
+          },
+        },
+      ],
+    };
+
+    setQuestions((prev) => [newQuestion, ...prev]);
+
+    addAuditLog(
+      submitDirectly ? 'SUBMIT_REVIEW' : 'CREATE_QUESTION',
+      submitDirectly
+        ? `Membuat soal baru ${code} (${newQuestion.subtest}) dan langsung mengajukan untuk review`
+        : `Menyimpan draf soal baru ${code} (${newQuestion.subtest})`,
+      newId,
+      code
+    );
+
+    if (submitDirectly) {
+      // Find reviewer users
+      const reviewer = users.find((u) => u.role === 'reviewer');
+      addNotification(
+        reviewer ? reviewer.id : 'usr-2',
+        'Soal Baru Menunggu Review',
+        `${currentUser.name} mengajukan soal ${code} (${newQuestion.subtest} - ${newQuestion.topic}).`,
+        'info',
+        newId
+      );
+    }
+
+    return newQuestion;
+  };
+
+  const updateQuestion = (id: string, data: Partial<Question>, submitForReview: boolean) => {
+    setQuestions((prev) =>
+      prev.map((q) => {
+        if (q.id !== id) return q;
+
+        const isApproved = q.status === 'disetujui';
+        let nextVersion = q.version;
+        if (isApproved) {
+          const [major] = q.version.split('.').map(Number);
+          nextVersion = `${major + 1}.0`;
+        }
+
+        const newStatus = submitForReview ? 'menunggu_review' : isApproved ? 'draft' : q.status;
+
+        const updatedVersions = [
+          {
+            versionNumber: nextVersion,
+            timestamp: new Date().toISOString(),
+            modifiedBy: currentUser.name,
+            changeSummary: isApproved
+              ? `Revisi dari versi ${q.version} (versi disetujui)`
+              : submitForReview
+              ? 'Pembaruan dan pengajuan ulang review'
+              : 'Pembaruan draf/revisi',
+            snapshot: {
+              prompt: q.prompt,
+              status: q.status,
+              options: q.options,
+              version: q.version,
+            },
+          },
+          ...q.versions,
+        ];
+
+        const updated: Question = {
+          ...q,
+          ...data,
+          status: newStatus,
+          version: nextVersion,
+          updatedAt: new Date().toISOString(),
+          versions: updatedVersions,
+        };
+
+        addAuditLog(
+          submitForReview ? 'SUBMIT_REVIEW' : 'UPDATE_QUESTION',
+          submitForReview
+            ? `Mengirimkan revisi soal ${q.code} ke antrian review (v${nextVersion})`
+            : `Memperbarui konten soal ${q.code} (v${nextVersion})`,
+          q.id,
+          q.code,
+          {
+            field: 'status',
+            oldValue: q.status,
+            newValue: newStatus,
+          }
+        );
+
+        if (submitForReview) {
+          const reviewer = users.find((u) => u.role === 'reviewer');
+          addNotification(
+            reviewer ? reviewer.id : 'usr-2',
+            'Pengajuan Ulang / Soal Siap Direview',
+            `${currentUser.name} memperbarui soal ${q.code} dan mengajukannya untuk review.`,
+            'info',
+            q.id
+          );
+        }
+
+        return updated;
+      })
+    );
+  };
+
+  const recallQuestion = (id: string) => {
+    const q = questions.find((item) => item.id === id);
+    if (!q || q.status !== 'menunggu_review') return;
+
+    setQuestions((prev) =>
+      prev.map((item) =>
+        item.id === id
+          ? {
+              ...item,
+              status: 'draft',
+              updatedAt: new Date().toISOString(),
+            }
+          : item
+      )
+    );
+
+    addAuditLog('RECALL', `Menarik kembali soal ${q.code} dari antrian review menjadi draf`, q.id, q.code, {
+      field: 'status',
+      oldValue: 'menunggu_review',
+      newValue: 'draft',
+    });
+
+    const reviewer = users.find((u) => u.role === 'reviewer');
+    addNotification(
+      reviewer ? reviewer.id : 'usr-2',
+      'Penarikan Soal dari Antrian',
+      `Penulis (${currentUser.name}) menarik kembali soal ${q.code} untuk perbaikan mandiri.`,
+      'warning',
+      q.id
+    );
+  };
+
+  const duplicateQuestion = (id: string) => {
+    const original = questions.find((q) => q.id === id);
+    if (!original) return;
+
+    const newId = `q-${Date.now()}`;
+    const subtestPrefix = original.subtest === 'Bahasa Indonesia' ? 'BIN' : original.subtest === 'Matematika' ? 'MAT' : 'IPA';
+    const randNum = Math.floor(100 + Math.random() * 900);
+    const newCode = `TKAD-${subtestPrefix}-${randNum}-VAR`;
+
+    const cloned: Question = {
+      ...original,
+      id: newId,
+      code: newCode,
+      status: 'draft',
+      version: '1.0',
+      createdById: currentUser.id,
+      createdByName: currentUser.name,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      prompt: `[Klon Variasi] ${original.prompt}`,
+      reviews: [],
+      versions: [
+        {
+          versionNumber: '1.0',
+          timestamp: new Date().toISOString(),
+          modifiedBy: currentUser.name,
+          changeSummary: `Diduplikasi dari ${original.code}`,
+          snapshot: { prompt: original.prompt },
+        },
+      ],
+    };
+
+    setQuestions((prev) => [cloned, ...prev]);
+    addAuditLog('DUPLICATE', `Menduplikasi soal ${original.code} menjadi variasi baru ${newCode}`, newId, newCode);
+  };
+
+  const deleteQuestion = (id: string) => {
+    const q = questions.find((item) => item.id === id);
+    if (!q) return;
+
+    setQuestions((prev) => prev.filter((item) => item.id !== id));
+    addAuditLog('UPDATE_QUESTION', `Menghapus butir soal ${q.code}`, q.id, q.code);
+  };
+
+  const submitReview = (
+    questionId: string,
+    decision: 'approve' | 'reject' | 'request_changes',
+    criteria: ReviewCriteriaRating,
+    generalComment: string,
+    optionComments?: Record<string, string>
+  ) => {
+    const target = questions.find((q) => q.id === questionId);
+    if (!target) return;
+
+    let newStatus: Question['status'] = 'disetujui';
+    let actionLog: AuditLog['action'] = 'APPROVE';
+    let notifTitle = 'Soal Disetujui';
+    let notifType: AppNotification['type'] = 'success';
+
+    if (decision === 'reject') {
+      newStatus = 'ditolak';
+      actionLog = 'REJECT';
+      notifTitle = 'Soal Ditolak';
+      notifType = 'error';
+    } else if (decision === 'request_changes') {
+      newStatus = 'perlu_revisi';
+      actionLog = 'REQUEST_CHANGES';
+      notifTitle = 'Catatan Review: Perlu Revisi';
+      notifType = 'warning';
+    }
+
+    const reviewRecord = {
+      id: `rev-${Date.now()}`,
+      reviewerId: currentUser.id,
+      reviewerName: currentUser.name,
+      timestamp: new Date().toISOString(),
+      decision,
+      generalComment,
+      criteria,
+      optionComments,
+    };
+
+    setQuestions((prev) =>
+      prev.map((q) => {
+        if (q.id !== questionId) return q;
+
+        return {
+          ...q,
+          status: newStatus,
+          updatedAt: new Date().toISOString(),
+          reviews: [reviewRecord, ...q.reviews],
+          versions: [
+            {
+              versionNumber: q.version,
+              timestamp: new Date().toISOString(),
+              modifiedBy: currentUser.name,
+              changeSummary: `Keputusan Review: ${decision.toUpperCase()} - ${generalComment.slice(0, 40)}...`,
+              snapshot: { status: newStatus },
+            },
+            ...q.versions,
+          ],
+        };
+      })
+    );
+
+    addAuditLog(
+      actionLog,
+      `Reviewer ${currentUser.name} mengambil keputusan [${decision.toUpperCase()}] untuk soal ${target.code}: "${generalComment.slice(0, 50)}..."`,
+      target.id,
+      target.code,
+      {
+        field: 'status',
+        oldValue: target.status,
+        newValue: newStatus,
+      }
+    );
+
+    addNotification(
+      target.createdById,
+      notifTitle,
+      `Reviewer ${currentUser.name} telah menilai soal ${target.code}. Keputusan: ${decision.toUpperCase()}. Catatan: ${generalComment}`,
+      notifType,
+      target.id
+    );
+  };
+
+  const addCategory = (cat: CategoryMetadata) => {
+    setCategories((prev) => [...prev, cat]);
+    addAuditLog('CONFIG_CHANGE', `Menambahkan subtes kategori baru: ${cat.name}`);
+  };
+
+  const updateCategory = (id: string, cat: Partial<CategoryMetadata>) => {
+    setCategories((prev) =>
+      prev.map((item) => (item.id === id ? { ...item, ...cat } : item))
+    );
+    addAuditLog('CONFIG_CHANGE', `Memperbarui subtes kategori ID: ${id}`);
+  };
+
+  const deleteCategory = (id: string) => {
+    const target = categories.find((c) => c.id === id);
+    if (!target) return;
+    setCategories((prev) => prev.filter((c) => c.id !== id));
+    addAuditLog('CONFIG_CHANGE', `Menghapus subtes kategori: ${target.name}`);
+  };
+
+  const markNotificationRead = (id: string) => {
+    setNotifications((prev) =>
+      prev.map((n) => (n.id === id ? { ...n, read: true } : n))
+    );
+  };
+
+  const markAllNotificationsRead = () => {
+    setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
+  };
+
+  const pullFromGoogleSheets = async (): Promise<{ success: boolean; message: string; count?: number }> => {
+    if (!spreadsheetId) {
+      return { success: false, message: 'ID Spreadsheet belum ditentukan.' };
+    }
+
+    setIsSyncing(true);
+    setSyncStatus('syncing');
+
+    try {
+      // 1. If Web App URL is configured, attempt via server proxy or direct GET
+      if (gasWebhookUrl) {
+        try {
+          let json: any = null;
+          // Attempt via server proxy first
+          try {
+            const proxyRes = await fetch(
+              `/api/gas-pull?webhookUrl=${encodeURIComponent(gasWebhookUrl)}&spreadsheetId=${encodeURIComponent(spreadsheetId)}`
+            );
+            if (proxyRes.ok) {
+              json = await proxyRes.json();
+            }
+          } catch {
+            // Server proxy failed or not available, continue to direct
+          }
+
+          if (!json) {
+            const directRes = await fetch(
+              `${gasWebhookUrl}?action=GET_DATA&spreadsheetId=${encodeURIComponent(spreadsheetId)}`
+            );
+            if (directRes.ok) {
+              json = await directRes.json();
+            }
+          }
+
+          if (json && json.status === 'success' && Array.isArray(json.data) && json.data.length > 0) {
+            const importedQuestions = parseGvizTableToQuestions({
+              rows: json.data.map((item: any) => ({
+                c: [
+                  { v: item.ID || item.id },
+                  { v: item.Kode || item.code },
+                  { v: item.Subtes || item.subtest },
+                  { v: item.Topik || item.topic },
+                  { v: item.Tipe || item.type },
+                  { v: item.Kesulitan || item.difficulty },
+                  { v: item.Bobot_Skor || item.defaultScore },
+                  { v: item.Teks_Soal || item.prompt },
+                  { v: item.Kunci_Jawaban || (item.options ? JSON.stringify(item.options) : '') },
+                  { v: item.Pembahasan || item.explanation },
+                  { v: item.Status || item.status },
+                  { v: item.Versi || item.version },
+                  { v: item.Penyusun || item.createdByName },
+                  { v: item.Dibuat_Pada || item.createdAt },
+                  { v: item.Diperbarui_Pada || item.updatedAt },
+                ],
+              })),
+            });
+
+            if (importedQuestions.length > 0) {
+              setQuestions((prev) => mergeQuestions(prev, importedQuestions));
+              const timeStr = new Date().toLocaleTimeString('id-ID');
+              setLastGasSyncTime(timeStr);
+              setSyncStatus('success');
+              const msg = `Berhasil memuat ${importedQuestions.length} butir soal dari basis data Spreadsheet via Apps Script.`;
+              setSyncMessage(msg);
+              return { success: true, message: msg, count: importedQuestions.length };
+            }
+          }
+        } catch (e) {
+          console.warn('GAS GET_DATA failed, trying Google visualization API:', e);
+        }
+      }
+
+      // 2. Query Google Visualization API (readable without auth for shared/public sheets)
+      const gvizUrls = [
+        `https://docs.google.com/spreadsheets/d/${spreadsheetId}/gviz/tq?sheet=Soal_TKAD&tqx=out:json`,
+        `https://docs.google.com/spreadsheets/d/${spreadsheetId}/gviz/tq?sheet=Sheet1&tqx=out:json`,
+        `https://docs.google.com/spreadsheets/d/${spreadsheetId}/gviz/tq?tqx=out:json`,
+      ];
+
+      let parsedQuestions: Question[] = [];
+      for (const url of gvizUrls) {
+        try {
+          const res = await fetch(url);
+          if (res.ok) {
+            const text = await res.text();
+            const match = text.match(/google\.visualization\.Query\.setResponse\(([\s\S]*)\);/);
+            if (match && match[1]) {
+              const parsed = JSON.parse(match[1]);
+              if (parsed.status === 'ok' && parsed.table && Array.isArray(parsed.table.rows) && parsed.table.rows.length > 0) {
+                parsedQuestions = parseGvizTableToQuestions(parsed.table);
+                if (parsedQuestions.length > 0) break;
+              }
+            }
+          }
+        } catch {
+          // continue checking next sheet
+        }
+      }
+
+      const timeStr = new Date().toLocaleTimeString('id-ID');
+      setLastGasSyncTime(timeStr);
+      setSyncStatus('success');
+
+      if (parsedQuestions.length > 0) {
+        setQuestions((prev) => mergeQuestions(prev, parsedQuestions));
+        const msg = `Sinkronisasi berhasil: ${parsedQuestions.length} butir soal termuat dari basis data Spreadsheet (ID: ${spreadsheetId.slice(0, 8)}...).`;
+        setSyncMessage(msg);
+        return { success: true, message: msg, count: parsedQuestions.length };
+      }
+
+      const msg = `Terhubung ke basis data Google Sheets (ID: ${spreadsheetId.slice(0, 10)}...). Belum ada butir soal baru pada lembar kerja.`;
+      setSyncMessage(msg);
+      return { success: true, message: msg, count: 0 };
+    } catch (err: any) {
+      setSyncStatus('error');
+      const msg = `Gagal sinkronisasi data dari Google Sheets: ${err?.message || err}`;
+      setSyncMessage(msg);
+      return { success: false, message: msg };
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
+  const syncWithGoogleSheets = async (options?: { silent?: boolean }): Promise<{ success: boolean; message: string }> => {
+    if (!options?.silent) {
+      setIsSyncing(true);
+      setSyncStatus('syncing');
+    }
+
+    try {
+      const payload = {
+        action: 'SYNC_ALL',
+        spreadsheetId,
+        questions,
+        users,
+        auditLogs: auditLogs.slice(0, 30),
+        timestamp: new Date().toISOString(),
+      };
+
+      if (gasWebhookUrl) {
+        let pushSucceeded = false;
+        let responseMsg = '';
+
+        // Strategy 1: Server-side proxy /api/gas-sync (Zero CORS issues, follows 302 redirects automatically)
+        try {
+          const proxyRes = await fetch('/api/gas-sync', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              webhookUrl: gasWebhookUrl,
+              payload,
+            }),
+          });
+
+          if (proxyRes.ok) {
+            const json = await proxyRes.json();
+            if (json.success) {
+              pushSucceeded = true;
+              responseMsg = json.message || `Data (${questions.length} butir soal, ${users.length} pengguna) berhasil dikirim otomatis ke Google Spreadsheet via GAS.`;
+            }
+          }
+        } catch (proxyErr) {
+          console.warn('Server proxy /api/gas-sync unavailable, falling back to direct safe fetch:', proxyErr);
+        }
+
+        // Strategy 2: Direct browser request with Content-Type: text/plain and mode: no-cors (Prevents CORS preflight OPTIONS error)
+        if (!pushSucceeded) {
+          try {
+            await fetch(gasWebhookUrl, {
+              method: 'POST',
+              headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+              body: JSON.stringify(payload),
+              mode: 'no-cors',
+            });
+            pushSucceeded = true;
+            responseMsg = `Perubahan data (${questions.length} butir soal, ${users.length} pengguna) berhasil dikirim otomatis ke Google Apps Script.`;
+          } catch (directErr: any) {
+            console.warn('Direct fallback error:', directErr);
+          }
+        }
+
+        if (pushSucceeded) {
+          const timeStr = new Date().toLocaleTimeString('id-ID');
+          setLastGasSyncTime(timeStr);
+          setSyncStatus('success');
+          setSyncMessage(responseMsg);
+          return { success: true, message: responseMsg };
+        }
+      }
+
+      // If gasWebhookUrl is not set yet, perform verify ping to Google Visualization API
+      await fetch(`https://docs.google.com/spreadsheets/d/${spreadsheetId}/gviz/tq?tqx=out:json`, { method: 'GET' })
+        .catch(() => null);
+
+      const timeStr = new Date().toLocaleTimeString('id-ID');
+      setLastGasSyncTime(timeStr);
+      setSyncStatus('success');
+      const msg = gasWebhookUrl
+        ? `Tersinkron otomatis (${questions.length} butir soal, ${users.length} pengguna) ke basis data Spreadsheet ID: ${spreadsheetId.slice(0, 10)}...`
+        : `Basis data Spreadsheet terhubung (ID: ${spreadsheetId.slice(0, 10)}...). Silakan pastikan Web App URL diatur agar perubahan data terkirim langsung.`;
+      setSyncMessage(msg);
+      return { success: true, message: msg };
+    } catch (err: any) {
+      setSyncStatus('error');
+      const msg = `Gagal sinkron: ${err?.message || err}`;
+      setSyncMessage(msg);
+      return { success: false, message: msg };
+    } finally {
+      if (!options?.silent) {
+        setIsSyncing(false);
+      }
+    }
+  };
+
+  // Auto-sync effect: initial pull from Google Sheets on mount or when spreadsheetId changes
+  useEffect(() => {
+    if (autoSyncEnabled && spreadsheetId) {
+      pullFromGoogleSheets();
+    }
+  }, [spreadsheetId]);
+
+  // Periodic auto-sync every 60 seconds
+  useEffect(() => {
+    if (!autoSyncEnabled) return;
+    const interval = setInterval(() => {
+      syncWithGoogleSheets({ silent: true });
+    }, 60000);
+    return () => clearInterval(interval);
+  }, [autoSyncEnabled, spreadsheetId, questions, users, auditLogs, gasWebhookUrl]);
+
+  // Debounced auto-sync when questions change
+  useEffect(() => {
+    if (!autoSyncEnabled) return;
+    const timer = setTimeout(() => {
+      syncWithGoogleSheets({ silent: true });
+    }, 1500);
+    return () => clearTimeout(timer);
+  }, [questions, autoSyncEnabled]);
+
+  // Debounced auto-sync when users change (User Management)
+  useEffect(() => {
+    if (!autoSyncEnabled) return;
+    const timer = setTimeout(() => {
+      syncWithGoogleSheets({ silent: true });
+    }, 1500);
+    return () => clearTimeout(timer);
+  }, [users, autoSyncEnabled]);
+
+  return (
+    <AppContext.Provider
+      value={{
+        isAuthenticated,
+        currentUser,
+        setCurrentUser,
+        login,
+        logout,
+        theme,
+        toggleTheme,
+        users,
+        addUser,
+        updateUser,
+        deleteUser,
+        questions,
+        categories,
+        auditLogs,
+        notifications,
+        activeTab,
+        setActiveTab,
+        getAllowedTabs,
+        selectedQuestionId,
+        setSelectedQuestionId,
+        reviewingQuestionId,
+        setReviewingQuestionId,
+        editingQuestionId,
+        setEditingQuestionId,
+        createQuestion,
+        updateQuestion,
+        recallQuestion,
+        duplicateQuestion,
+        deleteQuestion,
+        submitReview,
+        addCategory,
+        updateCategory,
+        deleteCategory,
+        markNotificationRead,
+        markAllNotificationsRead,
+        spreadsheetId,
+        setSpreadsheetId,
+        autoSyncEnabled,
+        setAutoSyncEnabled,
+        isSyncing,
+        syncStatus,
+        syncMessage,
+        gasWebhookUrl,
+        setGasWebhookUrl,
+        lastGasSyncTime,
+        syncWithGoogleSheets,
+        pullFromGoogleSheets,
+        isSidebarMinimized,
+        setIsSidebarMinimized,
+        toggleSidebarMinimized,
+        isMobileSidebarOpen,
+        setIsMobileSidebarOpen,
+        toggleMobileSidebar,
+      }}
+    >
+      {children}
+    </AppContext.Provider>
+  );
+};
+
+export const useApp = () => {
+  const context = useContext(AppContext);
+  if (!context) {
+    throw new Error('useApp must be used within an AppProvider');
+  }
+  return context;
+};

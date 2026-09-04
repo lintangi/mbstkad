@@ -1,0 +1,760 @@
+import React, { useState } from 'react';
+import {
+  Database,
+  Code2,
+  Copy,
+  Check,
+  Download,
+  ExternalLink,
+  RefreshCw,
+  FileSpreadsheet,
+  Layers,
+  Sparkles,
+  AlertCircle,
+  HelpCircle,
+  Radio,
+  ArrowDownToLine,
+  ArrowUpFromLine,
+  CheckCircle2,
+} from 'lucide-react';
+import { useApp, DEFAULT_SPREADSHEET_ID, DEFAULT_GAS_URL } from '../context/AppContext';
+
+export const GoogleSheetsIntegrationModal: React.FC = () => {
+  const {
+    spreadsheetId,
+    setSpreadsheetId,
+    autoSyncEnabled,
+    setAutoSyncEnabled,
+    gasWebhookUrl,
+    setGasWebhookUrl,
+    lastGasSyncTime,
+    isSyncing,
+    syncStatus,
+    syncMessage,
+    syncWithGoogleSheets,
+    pullFromGoogleSheets,
+    questions,
+    currentUser,
+    setActiveTab: setAppTab,
+  } = useApp();
+
+  const [activeTab, setActiveTab] = useState<'connect' | 'code_gs' | 'schema'>('connect');
+  const [copied, setCopied] = useState(false);
+  const [localMessage, setLocalMessage] = useState<{ success: boolean; text: string } | null>(null);
+
+  if (currentUser.role !== 'admin') {
+    return (
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
+        <div className="bg-white dark:bg-slate-900 p-8 rounded-2xl border border-slate-200 dark:border-slate-800 text-center space-y-3 max-w-md mx-auto">
+          <AlertCircle className="w-10 h-10 text-rose-500 mx-auto" />
+          <h2 className="text-lg font-bold text-slate-900 dark:text-white">Akses Dibatasi</h2>
+          <p className="text-xs text-slate-500 dark:text-slate-400">
+            Pengaturan integrasi Google Sheets & Google Apps Script (GAS) hanya dapat diakses oleh Administrator.
+          </p>
+          <button
+            onClick={() => setAppTab('dashboard')}
+            className="px-4 py-2 bg-blue-600 text-white rounded-xl text-xs font-semibold hover:bg-blue-700 transition cursor-pointer"
+          >
+            Kembali ke Dashboard
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  const defaultId = DEFAULT_SPREADSHEET_ID;
+  const spreadsheetUrl = `https://docs.google.com/spreadsheets/d/${spreadsheetId || defaultId}/edit`;
+
+  const googleAppsScriptCode = `/**
+ * ==============================================================================
+ * SISTEM MANAJEMEN BANK SOAL TKAD-ADIWERNA - GOOGLE APPS SCRIPT CONNECTOR
+ * ==============================================================================
+ * Basis Data Default: Google Spreadsheet
+ * ID: ${spreadsheetId || defaultId}
+ * Link: https://docs.google.com/spreadsheets/d/${spreadsheetId || defaultId}/edit
+ * ==============================================================================
+ * Petunjuk Deploy:
+ * 1. Buka spreadsheet > menu Ekstensi > Apps Script.
+ * 2. Tempel seluruh kode ini di Code.gs dan klik Simpan.
+ * 3. Klik "Deploy" > "New deployment" (Terapkan > Deployment baru).
+ * 4. Pilih tipe "Web app" (Aplikasi web).
+ * 5. Execute as: "Me" (Saya).
+ * 6. Who has access: "Anyone" (Siapa saja).
+ * 7. Salin Web App URL yang dihasilkan dan tempelkan di aplikasi TKAD.
+ * ==============================================================================
+ */
+
+const DEFAULT_SPREADSHEET_ID = '${spreadsheetId || defaultId}';
+
+const SHEET_NAMES = {
+  SOAL: 'Soal_TKAD',
+  USERS: 'Pengguna_Sistem',
+  VERSI: 'Versi_Log',
+  REVIEW: 'Review_History',
+  AUDIT: 'Audit_Trail',
+  CONFIG: 'System_Config'
+};
+
+function getDatabaseSpreadsheet(e) {
+  try {
+    if (e && e.parameter && e.parameter.spreadsheetId) {
+      return SpreadsheetApp.openById(e.parameter.spreadsheetId);
+    }
+    return SpreadsheetApp.openById(DEFAULT_SPREADSHEET_ID);
+  } catch (err) {
+    return SpreadsheetApp.getActiveSpreadsheet();
+  }
+}
+
+/**
+ * Endpoint GET: Membaca data bank soal dari Spreadsheet
+ */
+function doGet(e) {
+  try {
+    const ss = getDatabaseSpreadsheet(e);
+    initDatabaseSheets(ss);
+
+    const sheetSoal = ss.getSheetByName(SHEET_NAMES.SOAL);
+    const rows = sheetSoal.getDataRange().getValues();
+    
+    if (rows.length <= 1) {
+      return ContentService.createTextOutput(JSON.stringify({
+        status: 'success',
+        total: 0,
+        data: []
+      })).setMimeType(ContentService.MimeType.JSON);
+    }
+
+    const headers = rows[0];
+    const data = [];
+    for (let i = 1; i < rows.length; i++) {
+      const row = rows[i];
+      if (!row[0]) continue;
+      const obj = {};
+      headers.forEach((h, idx) => {
+        obj[h] = row[idx];
+      });
+      data.push(obj);
+    }
+
+    return ContentService.createTextOutput(JSON.stringify({
+      status: 'success',
+      total: data.length,
+      data: data
+    })).setMimeType(ContentService.MimeType.JSON);
+
+  } catch (err) {
+    return ContentService.createTextOutput(JSON.stringify({
+      status: 'error',
+      message: err.toString()
+    })).setMimeType(ContentService.MimeType.JSON);
+  }
+}
+
+/**
+ * Endpoint POST: Menangani sinkronisasi otomatis dari aplikasi
+ */
+function doPost(e) {
+  const lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(25000);
+  } catch (t) {
+    return ContentService.createTextOutput(JSON.stringify({
+      status: 'error',
+      message: 'Server Google Apps Script sedang sibuk, silakan coba lagi.'
+    })).setMimeType(ContentService.MimeType.JSON);
+  }
+
+  try {
+    const ss = getDatabaseSpreadsheet(e);
+    initDatabaseSheets(ss);
+
+    let payload = {};
+    const rawContent = e && e.postData && e.postData.contents ? e.postData.contents : '';
+    
+    if (rawContent) {
+      try {
+        payload = JSON.parse(rawContent);
+      } catch (err) {
+        if (e.parameter && e.parameter.payload) {
+          payload = JSON.parse(e.parameter.payload);
+        }
+      }
+    } else if (e.parameter && e.parameter.payload) {
+      payload = JSON.parse(e.parameter.payload);
+    }
+
+    const action = payload.action || (e.parameter ? e.parameter.action : '');
+
+    if (action === 'SYNC_ALL' || action === 'PUSH_DATA') {
+      const sheetSoal = ss.getSheetByName(SHEET_NAMES.SOAL);
+      const questions = payload.questions || [];
+
+      // Bersihkan dan perbarui lembar soal
+      sheetSoal.clearContents();
+      
+      const headers = [
+        'ID', 'Kode', 'Subtes', 'Topik', 'Tipe', 'Kesulitan', 'Bobot_Skor',
+        'Teks_Soal', 'Kunci_Jawaban', 'Pembahasan', 'Status', 'Versi', 
+        'Penyusun', 'Dibuat_Pada', 'Diperbarui_Pada'
+      ];
+      sheetSoal.appendRow(headers);
+      sheetSoal.getRange(1, 1, 1, 15).setFontWeight('bold').setBackground('#E2E8F0');
+
+      questions.forEach(q => {
+        let answerData = '';
+        if (q.options) answerData = JSON.stringify(q.options);
+        else if (q.matchingPairs) answerData = JSON.stringify(q.matchingPairs);
+        else if (q.trueFalseItems) answerData = JSON.stringify(q.trueFalseItems);
+        else if (q.shortAnswerKey) answerData = q.shortAnswerKey;
+        else if (q.essayRubric) answerData = q.essayRubric;
+
+        sheetSoal.appendRow([
+          q.id,
+          q.code,
+          q.subtest,
+          q.topic,
+          q.type,
+          q.difficulty,
+          q.defaultScore,
+          q.prompt,
+          answerData,
+          q.explanation || '',
+          q.status,
+          q.version,
+          q.createdByName,
+          q.createdAt,
+          q.updatedAt
+        ]);
+      });
+
+      // Simpan Audit Log ringkas jika tersedia
+      if (payload.auditLogs && Array.isArray(payload.auditLogs) && payload.auditLogs.length > 0) {
+        const sheetAudit = ss.getSheetByName(SHEET_NAMES.AUDIT);
+        if (sheetAudit) {
+          payload.auditLogs.slice(0, 25).forEach(log => {
+            sheetAudit.appendRow([
+              log.id,
+              log.timestamp,
+              log.userName,
+              log.userRole,
+              log.action,
+              log.questionCode || '-',
+              log.details
+            ]);
+          });
+        }
+      }
+
+      // Perbarui lembar Pengguna Sistem jika tersedia
+      if (payload.users && Array.isArray(payload.users) && payload.users.length > 0) {
+        const sheetUsers = ss.getSheetByName(SHEET_NAMES.USERS);
+        if (sheetUsers) {
+          sheetUsers.clearContents();
+          const userHeaders = ['ID', 'Nama_Lengkap', 'Email', 'Role', 'Departemen', 'Status', 'Inisial', 'Dibuat_Pada'];
+          sheetUsers.appendRow(userHeaders);
+          sheetUsers.getRange(1, 1, 1, 8).setFontWeight('bold').setBackground('#E2E8F0');
+          payload.users.forEach(u => {
+            sheetUsers.appendRow([
+              u.id,
+              u.name,
+              u.email,
+              u.role,
+              u.department || '',
+              u.status || 'aktif',
+              u.avatar || '',
+              u.createdAt || new Date().toISOString()
+            ]);
+          });
+        }
+      }
+
+      return ContentService.createTextOutput(JSON.stringify({
+        status: 'success',
+        message: 'Basis data Spreadsheet berhasil disinkronkan (' + questions.length + ' butir soal, ' + (payload.users ? payload.users.length : 0) + ' pengguna)',
+        timestamp: new Date().toISOString()
+      })).setMimeType(ContentService.MimeType.JSON);
+    }
+
+    return ContentService.createTextOutput(JSON.stringify({
+      status: 'error',
+      message: 'Aksi tidak dikenal: ' + action
+    })).setMimeType(ContentService.MimeType.JSON);
+
+  } catch (err) {
+    return ContentService.createTextOutput(JSON.stringify({
+      status: 'error',
+      message: err.toString()
+    })).setMimeType(ContentService.MimeType.JSON);
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+/**
+ * Inisialisasi struktur sheet dan format kolom otomatis jika belum ada
+ */
+function initDatabaseSheets(ss) {
+  Object.values(SHEET_NAMES).forEach(name => {
+    let s = ss.getSheetByName(name);
+    if (!s) {
+      s = ss.insertSheet(name);
+      if (name === SHEET_NAMES.SOAL) {
+        s.appendRow([
+          'ID', 'Kode', 'Subtes', 'Topik', 'Tipe', 'Kesulitan', 'Bobot_Skor',
+          'Teks_Soal', 'Kunci_Jawaban', 'Pembahasan', 'Status', 'Versi', 
+          'Penyusun', 'Dibuat_Pada', 'Diperbarui_Pada'
+        ]);
+        s.getRange(1, 1, 1, 15).setFontWeight('bold').setBackground('#E2E8F0');
+      } else if (name === SHEET_NAMES.USERS) {
+        s.appendRow(['ID', 'Nama_Lengkap', 'Email', 'Role', 'Departemen', 'Status', 'Inisial', 'Dibuat_Pada']);
+        s.getRange(1, 1, 1, 8).setFontWeight('bold').setBackground('#E2E8F0');
+      } else if (name === SHEET_NAMES.AUDIT) {
+        s.appendRow(['ID_Log', 'Waktu', 'Pengguna', 'Peran', 'Aksi', 'Kode_Soal', 'Deskripsi']);
+        s.getRange(1, 1, 1, 7).setFontWeight('bold').setBackground('#E2E8F0');
+      }
+    }
+  });
+}
+`;
+
+  const handleCopyCode = () => {
+    navigator.clipboard.writeText(googleAppsScriptCode);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2500);
+  };
+
+  const handleTriggerPush = async () => {
+    setLocalMessage(null);
+    const res = await syncWithGoogleSheets();
+    setLocalMessage({ success: res.success, text: res.message });
+  };
+
+  const handleTriggerPull = async () => {
+    setLocalMessage(null);
+    const res = await pullFromGoogleSheets();
+    setLocalMessage({ success: res.success, text: res.message });
+  };
+
+  const handleResetToDefault = () => {
+    setSpreadsheetId(defaultId);
+    setLocalMessage({ success: true, text: `ID Spreadsheet diatur ulang ke default: ${defaultId}` });
+  };
+
+  const downloadStarterSheetsCSV = () => {
+    const headers = [
+      'ID', 'Kode', 'Subtes', 'Topik', 'Tipe', 'Kesulitan', 'Bobot_Skor',
+      'Teks_Soal', 'Kunci_Jawaban', 'Pembahasan', 'Status', 'Versi', 
+      'Penyusun', 'Dibuat_Pada', 'Diperbarui_Pada'
+    ];
+    const rows = questions.map((q) => [
+      `"${q.id}"`,
+      `"${q.code}"`,
+      `"${q.subtest}"`,
+      `"${q.topic}"`,
+      `"${q.type}"`,
+      `"${q.difficulty}"`,
+      q.defaultScore,
+      `"${q.prompt.replace(/"/g, '""')}"`,
+      `"${JSON.stringify(q.options || []).replace(/"/g, '""')}"`,
+      `"${(q.explanation || '').replace(/"/g, '""')}"`,
+      `"${q.status}"`,
+      `"${q.version}"`,
+      `"${q.createdByName}"`,
+      `"${q.createdAt}"`,
+      `"${q.updatedAt}"`,
+    ]);
+
+    const csvContent = 'data:text/csv;charset=utf-8,' + [headers.join(','), ...rows.map((r) => r.join(','))].join('\n');
+    const encoded = encodeURI(csvContent);
+    const link = document.createElement('a');
+    link.setAttribute('href', encoded);
+    link.setAttribute('download', `template_db_tkad_adiwerna.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  return (
+    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-6 text-slate-800 dark:text-slate-100 transition-colors">
+      {/* Header & Status Card */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <div className="flex items-center space-x-2">
+            <h1 className="text-2xl font-bold text-slate-900 dark:text-white tracking-tight">
+              Basis Data Google Spreadsheet & Otomatis Sinkron
+            </h1>
+            <span className="bg-emerald-100 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300 text-xs font-bold px-2.5 py-0.5 rounded-full border border-emerald-200 dark:border-emerald-800 flex items-center space-x-1">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+              <span>Otomatis Sinkron</span>
+            </span>
+          </div>
+          <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+            Basis data utama terhubung ke Google Spreadsheet ID: <strong className="font-mono text-slate-700 dark:text-slate-300">{spreadsheetId}</strong>
+          </p>
+        </div>
+
+        <div className="flex items-center space-x-2">
+          <a
+            href={spreadsheetUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="px-3.5 py-2 rounded-xl bg-emerald-50 dark:bg-emerald-950/50 hover:bg-emerald-100 dark:hover:bg-emerald-900/60 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 text-xs font-semibold shadow-2xs transition flex items-center space-x-1.5 cursor-pointer"
+          >
+            <ExternalLink className="w-4 h-4" />
+            <span>Buka Google Sheets</span>
+          </a>
+
+          <button
+            onClick={downloadStarterSheetsCSV}
+            className="px-3.5 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-850 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200 text-xs font-semibold shadow-2xs transition flex items-center space-x-1.5 cursor-pointer"
+          >
+            <Download className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+            <span>Unduh CSV</span>
+          </button>
+        </div>
+      </div>
+
+      {/* Quick Sync & Status Bar */}
+      <div className="bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-slate-850 dark:to-slate-800/80 p-4 sm:p-5 rounded-2xl border border-blue-100 dark:border-slate-700/70 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+        <div className="flex items-center space-x-3.5">
+          <div className="w-10 h-10 rounded-xl bg-emerald-600 text-white flex items-center justify-center shrink-0 shadow-xs">
+            <FileSpreadsheet className="w-5 h-5" />
+          </div>
+          <div>
+            <div className="flex items-center space-x-2">
+              <p className="text-sm font-bold text-slate-900 dark:text-white">
+                Basis Data Aktif: <span className="font-mono text-xs text-blue-700 dark:text-blue-400">{spreadsheetId}</span>
+              </p>
+              {autoSyncEnabled && (
+                <span className="text-[10px] bg-emerald-100 dark:bg-emerald-900/50 text-emerald-700 dark:text-emerald-300 px-2 py-0.5 rounded-full font-semibold">
+                  Auto-Sync Aktif
+                </span>
+              )}
+            </div>
+            <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+              {lastGasSyncTime ? `Terakhir sinkronisasi: ${lastGasSyncTime}` : 'Otomatis tersinkron setiap perubahan butir soal & interval 60 detik'}
+            </p>
+          </div>
+        </div>
+
+        <div className="flex items-center flex-wrap gap-2 w-full md:w-auto">
+          <button
+            onClick={handleTriggerPull}
+            disabled={isSyncing}
+            className="flex-1 md:flex-none px-3.5 py-2 rounded-xl bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 text-xs font-semibold shadow-2xs transition flex items-center justify-center space-x-1.5 disabled:opacity-50 cursor-pointer"
+          >
+            <ArrowDownToLine className={`w-3.5 h-3.5 ${isSyncing ? 'animate-bounce' : 'text-blue-600 dark:text-blue-400'}`} />
+            <span>Tarik dari Sheets (Pull)</span>
+          </button>
+
+          <button
+            onClick={handleTriggerPush}
+            disabled={isSyncing}
+            className="flex-1 md:flex-none px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold shadow-xs transition flex items-center justify-center space-x-1.5 disabled:opacity-50 cursor-pointer"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin' : ''}`} />
+            <span>{isSyncing ? 'Menyinkronkan...' : 'Sinkronkan Sekarang'}</span>
+          </button>
+        </div>
+      </div>
+
+      {/* Local Notification / Status Message */}
+      {(localMessage || syncMessage) && (
+        <div
+          className={`p-4 rounded-xl text-xs flex items-start space-x-3 transition ${
+            (localMessage?.success ?? syncStatus === 'success')
+              ? 'bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 text-emerald-900 dark:text-emerald-200'
+              : 'bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800 text-rose-900 dark:text-rose-200'
+          }`}
+        >
+          {(localMessage?.success ?? syncStatus === 'success') ? (
+            <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0 mt-0.5" />
+          ) : (
+            <AlertCircle className="w-4 h-4 text-rose-600 dark:text-rose-400 shrink-0 mt-0.5" />
+          )}
+          <div className="flex-1">
+            <p className="font-semibold">
+              {(localMessage?.success ?? syncStatus === 'success') ? 'Sinkronisasi Otomatis Sukses' : 'Catatan Sinkronisasi'}
+            </p>
+            <p className="mt-0.5">{localMessage?.text || syncMessage}</p>
+          </div>
+        </div>
+      )}
+
+      {/* Navigation Tabs */}
+      <div className="border-b border-slate-200 dark:border-slate-800 flex space-x-6 text-xs font-semibold">
+        <button
+          onClick={() => setActiveTab('connect')}
+          className={`pb-3 border-b-2 transition flex items-center space-x-2 cursor-pointer ${
+            activeTab === 'connect'
+              ? 'border-blue-600 text-blue-600 dark:text-blue-400'
+              : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-white'
+          }`}
+        >
+          <RefreshCw className="w-4 h-4" />
+          <span>Konfigurasi & Auto-Sync</span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab('code_gs')}
+          className={`pb-3 border-b-2 transition flex items-center space-x-2 cursor-pointer ${
+            activeTab === 'code_gs'
+              ? 'border-blue-600 text-blue-600 dark:text-blue-400'
+              : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-white'
+          }`}
+        >
+          <Code2 className="w-4 h-4" />
+          <span>Skrip Google Apps Script (Code.gs)</span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab('schema')}
+          className={`pb-3 border-b-2 transition flex items-center space-x-2 cursor-pointer ${
+            activeTab === 'schema'
+              ? 'border-blue-600 text-blue-600 dark:text-blue-400'
+              : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-white'
+          }`}
+        >
+          <Database className="w-4 h-4" />
+          <span>Struktur Tabel & Relasi Sheets</span>
+        </button>
+      </div>
+
+      {/* TAB 1: CONNECT & CONFIG */}
+      {activeTab === 'connect' && (
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          <div className="lg:col-span-2 bg-white dark:bg-slate-900 p-6 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xs space-y-6">
+            <div>
+              <h3 className="font-bold text-slate-900 dark:text-white text-base">
+                Pengaturan Basis Data Spreadsheet
+              </h3>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                ID Google Spreadsheet ini digunakan sebagai basis data default untuk seluruh operasi butir soal dan catatan audit.
+              </p>
+            </div>
+
+            {/* Auto-sync Toggle Card */}
+            <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700/60 flex items-center justify-between">
+              <div className="space-y-0.5">
+                <p className="text-xs font-bold text-slate-900 dark:text-white flex items-center space-x-2">
+                  <span>Sinkronisasi Otomatis (Auto-Sync)</span>
+                  <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                </p>
+                <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                  Secara otomatis menyinkronkan data setiap ada perubahan pada bank soal dan interval berkala 60 detik.
+                </p>
+              </div>
+
+              <label className="relative inline-flex items-center cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={autoSyncEnabled}
+                  onChange={(e) => setAutoSyncEnabled(e.target.checked)}
+                  className="sr-only peer"
+                />
+                <div className="w-11 h-6 bg-slate-300 peer-focus:outline-none rounded-full peer dark:bg-slate-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-slate-600 peer-checked:bg-emerald-600"></div>
+              </label>
+            </div>
+
+            {/* Spreadsheet ID Field */}
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
+                  Google Spreadsheet ID (Default)
+                </label>
+                {spreadsheetId !== defaultId && (
+                  <button
+                    onClick={handleResetToDefault}
+                    className="text-[11px] text-blue-600 dark:text-blue-400 hover:underline cursor-pointer"
+                  >
+                    Reset ke Default ({defaultId.slice(0, 10)}...)
+                  </button>
+                )}
+              </div>
+              <input
+                type="text"
+                value={spreadsheetId}
+                onChange={(e) => setSpreadsheetId(e.target.value.trim())}
+                className="w-full text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-800 p-3 text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono"
+              />
+              <p className="text-[11px] text-slate-400 dark:text-slate-500">
+                Spreadsheet ID diambil dari URL Google Sheets: <code className="text-slate-600 dark:text-slate-300">/spreadsheets/d/<strong>{spreadsheetId}</strong>/edit</code>
+              </p>
+            </div>
+
+            {/* Web App Deployment URL Field */}
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 flex items-center space-x-1.5">
+                  <span>Google Apps Script Web App URL (Default Aktif)</span>
+                  <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800">
+                    Otomatis Live Push
+                  </span>
+                </label>
+                <div className="flex items-center space-x-2">
+                  {gasWebhookUrl !== DEFAULT_GAS_URL && (
+                    <button
+                      onClick={() => setGasWebhookUrl(DEFAULT_GAS_URL)}
+                      className="text-[11px] text-blue-600 dark:text-blue-400 hover:underline cursor-pointer"
+                    >
+                      Reset ke Default
+                    </button>
+                  )}
+                  {gasWebhookUrl && (
+                    <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-semibold flex items-center space-x-1">
+                      <CheckCircle2 className="w-3 h-3" />
+                      <span>Aktif</span>
+                    </span>
+                  )}
+                </div>
+              </div>
+              <input
+                type="url"
+                placeholder={DEFAULT_GAS_URL}
+                value={gasWebhookUrl}
+                onChange={(e) => setGasWebhookUrl(e.target.value.trim())}
+                className="w-full text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-800 p-3 text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono"
+              />
+              <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                Alamat Web App untuk transmisi otomatis seluruh perubahan data ke Google Spreadsheet. Seluruh penambahan, pengeditan, persetujuan review, revisi, serta <strong>manajemen akun pengguna</strong> akan otomatis tersimpan langsung ke lembar kerja <strong>Soal_TKAD</strong>, <strong>Pengguna_Sistem</strong>, dan <strong>Audit_Trail</strong>.
+              </p>
+            </div>
+          </div>
+
+          {/* Quick Guide Card */}
+          <div className="bg-white dark:bg-slate-900 p-6 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xs space-y-4">
+            <h4 className="font-bold text-slate-900 dark:text-white text-sm flex items-center space-x-2">
+              <HelpCircle className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+              <span>Panduan Setup Otomatis Google Apps Script</span>
+            </h4>
+
+            <ol className="list-decimal list-inside space-y-2 text-xs text-slate-600 dark:text-slate-400 leading-relaxed">
+              <li>
+                Buka lembar kerja <a href={spreadsheetUrl} target="_blank" rel="noopener noreferrer" className="text-blue-600 dark:text-blue-400 font-semibold underline">Spreadsheet TKAD ({spreadsheetId.slice(0, 10)}...)</a>.
+              </li>
+              <li>
+                Masuk ke menu <strong>Ekstensi &gt; Apps Script</strong> pada spreadsheet.
+              </li>
+              <li>
+                Buka tab <strong>Skrip Code.gs</strong> di atas, klik tombol <strong>Salin Seluruh Code.gs</strong>, lalu tempelkan di editor Apps Script dan Simpan.
+              </li>
+              <li>
+                Klik tombol <strong>Deploy &gt; New deployment</strong>, pilih jenis <strong>Web app</strong>, atur <em>Execute as: Me</em> dan <em>Who has access: Anyone</em>.
+              </li>
+              <li>
+                Salin Web App URL yang dihasilkan ke kolom input di atas. Sistem proxy server akan otomatis mengirim setiap perubahan data soal secara langsung tanpa kendala CORS.
+              </li>
+            </ol>
+          </div>
+        </div>
+      )}
+
+      {/* TAB 2: CODE.GS */}
+      {activeTab === 'code_gs' && (
+        <div className="space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-blue-50 dark:bg-slate-850 p-4 rounded-xl border border-blue-200/60 dark:border-slate-800">
+            <div>
+              <p className="text-xs font-bold text-slate-900 dark:text-white">
+                Skrip Google Apps Script (Telah Dikonfigurasi untuk Spreadsheet ID: {spreadsheetId.slice(0, 12)}...)
+              </p>
+              <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                Salin skrip ini ke menu <em>Ekstensi &gt; Apps Script</em> pada Google Spreadsheet Anda untuk mengaktifkan Web App dua arah.
+              </p>
+            </div>
+
+            <button
+              onClick={handleCopyCode}
+              className="px-3.5 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold shadow-xs transition flex items-center space-x-1.5 cursor-pointer shrink-0 self-start sm:self-auto"
+            >
+              {copied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+              <span>{copied ? 'Tersalin!' : 'Salin Seluruh Code.gs'}</span>
+            </button>
+          </div>
+
+          <div className="relative rounded-2xl bg-slate-900 border border-slate-800 p-4 font-mono text-xs text-slate-300 overflow-x-auto shadow-inner">
+            <pre className="leading-relaxed">{googleAppsScriptCode}</pre>
+          </div>
+        </div>
+      )}
+
+      {/* TAB 3: SHEETS SCHEMA */}
+      {activeTab === 'schema' && (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          {/* Table 1: Soal_TKAD */}
+          <div className="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xs space-y-3">
+            <div className="flex items-center justify-between">
+              <h3 className="font-bold text-slate-900 dark:text-white text-sm flex items-center space-x-2">
+                <FileSpreadsheet className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+                <span>Sheet 1: Soal_TKAD (Tabel Utama)</span>
+              </h3>
+              <span className="text-[11px] bg-emerald-50 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300 px-2 py-0.5 rounded font-semibold border border-emerald-200 dark:border-emerald-800">
+                15 Kolom
+              </span>
+            </div>
+
+            <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
+              Menyimpan seluruh metadata butir soal, konten formula LaTeX, kunci jawaban, dan status review.
+            </p>
+
+            <div className="space-y-1.5 text-xs">
+              {[
+                { col: 'ID', desc: 'UUID unik butir soal (Primary Key)' },
+                { col: 'Kode', desc: 'Kode soal resmi, misal TKAD-IND-001' },
+                { col: 'Subtes', desc: 'Nama mapel/subtes: Bahasa Indonesia, Matematika, IPAS' },
+                { col: 'Topik', desc: 'Topik pokok bahasan (input manual)' },
+                { col: 'Tipe', desc: 'pilihan_ganda, menjodohkan, benar_salah, isian, esai' },
+                { col: 'Kesulitan', desc: 'mudah | sedang | sulit' },
+                { col: 'Bobot_Skor', desc: 'Nilai poin default butir soal' },
+                { col: 'Teks_Soal', desc: 'Isi pertanyaan (mendukung KaTeX $formula$)' },
+                { col: 'Kunci_Jawaban', desc: 'JSON array/string kunci dan opsi jawaban' },
+                { col: 'Status', desc: 'draft | menunggu_review | disetujui | perlu_revisi' },
+                { col: 'Versi', desc: 'Nomor versi aktif (v1.0, v2.0)' },
+              ].map((item, i) => (
+                <div key={i} className="flex items-start justify-between py-1 border-b border-slate-100 dark:border-slate-800">
+                  <span className="font-mono font-bold text-slate-800 dark:text-slate-200">{item.col}</span>
+                  <span className="text-slate-500 dark:text-slate-400 text-[11px]">{item.desc}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Table 2: Audit_Trail */}
+          <div className="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xs space-y-3">
+            <div className="flex items-center justify-between">
+              <h3 className="font-bold text-slate-900 dark:text-white text-sm flex items-center space-x-2">
+                <Database className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+                <span>Sheet 2: Audit_Trail (Tabel Log)</span>
+              </h3>
+              <span className="text-[11px] bg-blue-50 dark:bg-blue-950/60 text-blue-800 dark:text-blue-300 px-2 py-0.5 rounded font-semibold border border-blue-200 dark:border-blue-800">
+                7 Kolom
+              </span>
+            </div>
+
+            <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
+              Mencatat jejak digital setiap aksi create, edit, approve, reject, atau recall oleh pengguna.
+            </p>
+
+            <div className="space-y-1.5 text-xs">
+              {[
+                { col: 'ID_Log', desc: 'ID unik log aktivitas' },
+                { col: 'Waktu', desc: 'Timestamp ISO 8601' },
+                { col: 'Pengguna', desc: 'Nama akun yang melakukan aksi' },
+                { col: 'Peran', desc: 'pembuat | reviewer | admin' },
+                { col: 'Aksi', desc: 'Jenis tindakan (SUBMIT_REVIEW, APPROVE, dll)' },
+                { col: 'Kode_Soal', desc: 'Referensi kode soal terkait' },
+                { col: 'Deskripsi', desc: 'Uraian detail aktivitas' },
+              ].map((item, i) => (
+                <div key={i} className="flex items-start justify-between py-1 border-b border-slate-100 dark:border-slate-800">
+                  <span className="font-mono font-bold text-slate-800 dark:text-slate-200">{item.col}</span>
+                  <span className="text-slate-500 dark:text-slate-400 text-[11px]">{item.desc}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
