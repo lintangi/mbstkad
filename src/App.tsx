@@ -15,9 +15,10 @@ import { ReviewQueueView } from './components/ReviewQueueView';
 import { AuditTrailView } from './components/AuditTrailView';
 import { AdminSettingsView } from './components/AdminSettingsView';
 import { UserManagementView } from './components/UserManagementView';
-import { DatabaseManagementView } from './components/DatabaseManagementView';
+import { GoogleSheetsIntegrationModal } from './components/GoogleSheetsIntegrationModal';
 import { QuestionDetailModal } from './components/QuestionDetailModal';
 import { ReviewModal } from './components/ReviewModal';
+import { ChangePasswordModal } from './components/ChangePasswordModal';
 
 const MainContent: React.FC = () => {
   const {
@@ -55,12 +56,13 @@ const MainContent: React.FC = () => {
         {activeTab === 'audit_log' && currentUser.role === 'admin' && <AuditTrailView />}
         {activeTab === 'manajemen_pengguna' && currentUser.role === 'admin' && <UserManagementView />}
         {activeTab === 'pengaturan' && currentUser.role === 'admin' && <AdminSettingsView />}
-        {activeTab === 'gas_sync' && currentUser.role === 'admin' && <DatabaseManagementView />}
+        {activeTab === 'gas_sync' && currentUser.role === 'admin' && <GoogleSheetsIntegrationModal />}
       </main>
 
       {/* Global Modals */}
       {selectedQuestionId && <QuestionDetailModal />}
       {reviewingQuestionId && <ReviewModal />}
+      <ChangePasswordModal />
 
       {/* Footer */}
       <footer
@@ -69,13 +71,13 @@ const MainContent: React.FC = () => {
         }`}
       >
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row items-center justify-between gap-2 text-xs text-slate-500 dark:text-slate-400">
-          <p>© 2026 Sistem Manajemen Bank Soal TKAD-Adiwerna • Berbasis JSON Store & Relational SQL Database</p>
+          <p>© 2026 Sistem Manajemen Bank Soal TKAD Adiwerna • Berbasis Web & Google Apps Script Engine</p>
           <div className="flex items-center space-x-4">
-            <span className="flex items-center space-x-1.5" title="Basis Data: JSON Store & SQL Dump Engine">
-              <span className="w-2 h-2 rounded-full bg-blue-500 animate-pulse" />
-              <span>Engine: JSON & SQL Database (PostgreSQL / MySQL / SQLite)</span>
+            <span className="flex items-center space-x-1.5" title={`Spreadsheet ID: ${spreadsheetId}`}>
+              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+              <span>Spreadsheet ({spreadsheetId ? spreadsheetId.slice(0, 10) + '...' : 'Default'}) • Auto-Sync</span>
             </span>
-            <span>Versi 2.5-JSON-SQL</span>
+            <span>Versi 2.4-GAS</span>
           </div>
         </div>
       </footer>

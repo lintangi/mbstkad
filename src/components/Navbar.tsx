@@ -15,6 +15,7 @@ import {
   Sparkles,
   Plus,
   PanelLeft,
+  KeyRound,
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { AppTab } from '../types';
@@ -37,6 +38,8 @@ export const Navbar: React.FC = () => {
     theme,
     toggleTheme,
     toggleMobileSidebar,
+    setShowChangePasswordModal,
+    setIsPasswordChangeForced,
   } = useApp();
 
   const [showNotifs, setShowNotifs] = useState(false);
@@ -72,10 +75,10 @@ export const Navbar: React.FC = () => {
               <div>
                 <div className="flex items-center space-x-2">
                   <span className="font-bold text-slate-900 dark:text-white tracking-tight text-lg">
-                    TKAD-Adiwerna Bank Soal
+                    TKAD Adiwerna
                   </span>
-                  <span className="bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 text-[10px] font-semibold px-2 py-0.5 rounded-md">
-                    JSON & SQL DB
+                  <span className="bg-blue-50 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800 text-[10px] font-semibold px-2 py-0.5 rounded-md">
+                    GAS Engine
                   </span>
                 </div>
                 <p className="text-[11px] text-slate-500 dark:text-slate-400">
@@ -101,16 +104,19 @@ export const Navbar: React.FC = () => {
               )}
             </button>
 
-            {/* Database Engine Pill (Admin role only) */}
+            {/* Google Sheets Sync Pill (Admin role only) */}
             {currentUser.role === 'admin' && (
               <button
                 onClick={() => setActiveTab('gas_sync')}
-                className="hidden md:flex items-center space-x-2 px-3 py-1.5 rounded-xl border border-indigo-200 dark:border-indigo-900/60 bg-indigo-50/70 dark:bg-indigo-950/40 hover:bg-indigo-100 dark:hover:bg-indigo-900/60 transition text-xs font-medium text-indigo-800 dark:text-indigo-300 cursor-pointer"
-                title="Basis Data Terstruktur: JSON Document Store & Relational SQL"
+                className="hidden md:flex items-center space-x-2 px-3 py-1.5 rounded-xl border border-emerald-200 dark:border-emerald-900/60 bg-emerald-50/70 dark:bg-emerald-950/40 hover:bg-emerald-100 dark:hover:bg-emerald-900/60 transition text-xs font-medium text-emerald-800 dark:text-emerald-300 cursor-pointer"
+                title={`Basis data default: Spreadsheet ID ${spreadsheetId} (Otomatis Sinkron Aktif)`}
               >
-                <Database className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
-                <span>Basis Data JSON & SQL</span>
+                <Database className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+                <span>Auto-Sync Sheets</span>
                 <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                {lastGasSyncTime && (
+                  <span className="text-[10px] text-emerald-600/80 dark:text-emerald-400/80">({lastGasSyncTime})</span>
+                )}
               </button>
             )}
 
@@ -238,8 +244,20 @@ export const Navbar: React.FC = () => {
                     <p className="text-[10px] text-slate-400 dark:text-slate-500">{currentUser.department}</p>
                   </div>
 
-                  {/* Logout Button */}
-                  <div className="px-3 pt-2">
+                  {/* User Profile Actions */}
+                  <div className="px-3 pt-2 space-y-1">
+                    <button
+                      onClick={() => {
+                        setShowUserMenu(false);
+                        setIsPasswordChangeForced(false);
+                        setShowChangePasswordModal(true);
+                      }}
+                      className="w-full px-3 py-2 rounded-xl text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition flex items-center space-x-2 cursor-pointer"
+                    >
+                      <KeyRound className="w-4 h-4 text-blue-500" />
+                      <span>Ganti Kata Sandi</span>
+                    </button>
+
                     <button
                       onClick={() => {
                         setShowUserMenu(false);
@@ -371,18 +389,18 @@ export const Navbar: React.FC = () => {
             </button>
           )}
 
-          {/* Basis Data JSON & SQL (Admin only) */}
+          {/* Google Sheets & GAS (Admin only) */}
           {allowedTabs.includes('gas_sync') && (
             <button
               onClick={() => setActiveTab('gas_sync')}
               className={`px-3 py-1.5 rounded-xl transition whitespace-nowrap flex items-center space-x-1.5 cursor-pointer ${
                 activeTab === 'gas_sync'
-                  ? 'bg-indigo-600 text-white font-semibold shadow-sm'
-                  : 'text-indigo-600 dark:text-indigo-400 bg-indigo-50/60 dark:bg-indigo-950/40 hover:bg-indigo-100 dark:hover:bg-indigo-900/60'
+                  ? 'bg-blue-600 text-white font-semibold shadow-sm'
+                  : 'text-blue-600 dark:text-blue-400 bg-blue-50/60 dark:bg-blue-950/40 hover:bg-blue-100 dark:hover:bg-blue-900/60'
               }`}
             >
               <Database className="w-3.5 h-3.5" />
-              <span>Basis Data (JSON & SQL)</span>
+              <span>Google Sheets & GAS</span>
             </button>
           )}
         </div>

@@ -79,7 +79,7 @@ export const AdminSettingsView: React.FC = () => {
           <div className="bg-white dark:bg-slate-900 p-6 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xs space-y-5">
             <div className="flex items-center justify-between">
               <div>
-                <h3 className="font-bold text-slate-900 dark:text-white text-sm">Struktur Mata Uji & Topik TKAD-Adiwerna</h3>
+                <h3 className="font-bold text-slate-900 dark:text-white text-sm">Struktur Mata Uji & Topik TKAD Adiwerna</h3>
                 <p className="text-xs text-slate-500 dark:text-slate-400">Mata pelajaran kompetensi utama yang diujikan</p>
               </div>
 

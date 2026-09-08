@@ -106,7 +106,7 @@ export const AuditTrailView: React.FC = () => {
         <div>
           <h1 className="text-2xl font-bold text-slate-900 dark:text-white tracking-tight">Audit Trail & Log Aktivitas</h1>
           <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-            Pencatatan riwayat setiap tindakan pengguna, perubahan status, dan modifikasi data bank soal TKAD-Adiwerna.
+            Pencatatan riwayat setiap tindakan pengguna, perubahan status, dan modifikasi data bank soal TKAD Adiwerna.
           </p>
         </div>
 

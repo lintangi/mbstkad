@@ -10,6 +10,8 @@ export interface User {
   password?: string;
   status?: 'aktif' | 'nonaktif';
   createdAt?: string;
+  isDefaultPassword?: boolean;
+  passwordChangedAt?: string;
 }
 
 export type QuestionType =

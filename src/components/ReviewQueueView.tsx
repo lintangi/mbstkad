@@ -42,7 +42,7 @@ export const ReviewQueueView: React.FC = () => {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <div className="flex items-center space-x-2">
-            <h1 className="text-2xl font-bold text-slate-900 dark:text-white tracking-tight">Antrian Review Soal TKAD-Adiwerna</h1>
+            <h1 className="text-2xl font-bold text-slate-900 dark:text-white tracking-tight">Antrian Review Soal TKAD Adiwerna</h1>
             <span className="bg-amber-100 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300 font-bold text-xs px-2.5 py-0.5 rounded-full border border-amber-200 dark:border-amber-800">
               {pendingQuestions.length} Menunggu
             </span>

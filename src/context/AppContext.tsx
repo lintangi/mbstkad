@@ -38,6 +38,11 @@ interface AppContextType {
   addUser: (data: Omit<User, 'id'>) => User;
   updateUser: (id: string, data: Partial<User>) => void;
   deleteUser: (id: string) => { success: boolean; message: string };
+  changePassword: (oldPassword: string, newPassword: string) => Promise<{ success: boolean; message: string }>;
+  showChangePasswordModal: boolean;
+  setShowChangePasswordModal: (show: boolean) => void;
+  isPasswordChangeForced: boolean;
+  setIsPasswordChangeForced: (forced: boolean) => void;
 
   // Data Collections
   questions: Question[];
@@ -49,6 +54,9 @@ interface AppContextType {
   activeTab: AppTab;
   setActiveTab: (tab: AppTab) => void;
   getAllowedTabs: (role: UserRole) => AppTab[];
+  getUserDepartmentCategory: (user: User) => string | null;
+  isUserAuthorizedForSubtest: (user: User, subtest: string) => boolean;
+  canUserEditQuestion: (user: User, question: Question) => { allowed: boolean; reason?: string };
 
   // Selection & Modal States
   selectedQuestionId: string | null;
@@ -120,11 +128,15 @@ const STORAGE_KEY_GAS_URL = 'tkad_gas_url_v3';
 const STORAGE_KEY_SPREADSHEET_ID = 'tkad_spreadsheet_id_v3';
 const STORAGE_KEY_AUTOSYNC = 'tkad_autosync_v3';
 
-export const DEFAULT_SPREADSHEET_ID = '1YSDHUR9CYgLHPGtFVUxQeCgcH51GdR-P9fqehUUnMK4';
-export const DEFAULT_GAS_URL = 'https://script.google.com/macros/s/AKfycbx9JoUcWeUq7JxS6Ab1MY0Bu4lbrZdxC1RmSy9rYzVPqJQfqQDkwkZ9mEiXJNBLBRC2Jg/exec';
+export const DEFAULT_SPREADSHEET_ID = '1Dv9vpvA_FFLwHBWX03DByx2ZqJ4wSzj0gFd5bceLDk0';
+export const DEFAULT_GAS_URL = 'https://script.google.com/macros/s/AKfycbylrwIAEjAIaanInaZqv4vp_SnLLTe3bflxmBxN9gF4ocEY0GYTzWvrj6SWSbSCg9Vj/exec';
 
-const PREV_DEFAULT_SPREADSHEET_ID = '1LbXmt8Ve2TrnNRzcgpLWfcRaW1au2GHWG4LnCtupDT8';
+const PREV_DEFAULT_SPREADSHEET_IDS = [
+  '1YSDHUR9CYgLHPGtFVUxQeCgcH51GdR-P9fqehUUnMK4',
+  '1LbXmt8Ve2TrnNRzcgpLWfcRaW1au2GHWG4LnCtupDT8',
+];
 const PREV_DEFAULT_GAS_URLS = [
+  'https://script.google.com/macros/s/AKfycbx9JoUcWeUq7JxS6Ab1MY0Bu4lbrZdxC1RmSy9rYzVPqJQfqQDkwkZ9mEiXJNBLBRC2Jg/exec',
   'https://script.google.com/macros/s/AKfycbw36Wln_iwfSLtYvUD8YutEMFgW5KEjbfAaITXXhiDL_EZHpcO8NIDtePHRrFA3Ws4l/exec',
   'https://script.google.com/macros/s/AKfycbzLi3eycowg1aaWsMN6_vN6zQ9L51kUdIi1_hkqxN26IPOPn0dUqHF5kNDiVNUyKjFfjA/exec',
 ];
@@ -132,7 +144,7 @@ const PREV_DEFAULT_GAS_URLS = [
 // Helper to parse Google Sheets Visualization API table rows into Question objects
 function parseGvizTableToQuestions(table: any): Question[] {
   if (!table || !Array.isArray(table.rows)) return [];
-  const questions: Question[] = [];
+  const questionMap = new Map<string, Question>();
 
   table.rows.forEach((r: any, idx: number) => {
     if (!r || !Array.isArray(r.c)) return;
@@ -145,6 +157,13 @@ function parseGvizTableToQuestions(table: any): Question[] {
     const id = getVal(0);
     // Ignore header row if accidentally captured
     if (!id || id.toLowerCase() === 'id' || id.toLowerCase() === 'kode') return;
+
+    // Check Status_Data column (Col 13 or check if marked as TIDAK_AKTIF / DIHAPUS / TERGANTIKAN)
+    const statusData = getVal(13).trim().toUpperCase();
+    if (statusData === 'TIDAK_AKTIF' || statusData === 'DIHAPUS' || statusData === 'TERGANTIKAN' || statusData === 'INACTIVE' || statusData === 'DELETED') {
+      // Historical/replaced row - do NOT display in active application
+      return;
+    }
 
     const code = getVal(1) || `TKAD-SOAL-${idx + 1}`;
     const subtest = getVal(2) || 'Bahasa Indonesia';
@@ -175,11 +194,13 @@ function parseGvizTableToQuestions(table: any): Question[] {
       ? statusStr
       : 'disetujui') as QuestionStatus;
     const version = getVal(11) || '1.0';
-    const createdByName = getVal(12) || 'Yusril';
-    const createdAt = getVal(13) || new Date().toISOString();
-    const updatedAt = getVal(14) || new Date().toISOString();
+    const createdByName = getVal(12) || 'Pengajar TKAD';
+    
+    // Dates can be in col 14/15 (with status_data) or col 13/14 (legacy 15-col sheet)
+    const createdAt = (statusData === 'AKTIF' ? getVal(14) : getVal(13)) || new Date().toISOString();
+    const updatedAt = (statusData === 'AKTIF' ? getVal(15) : getVal(14)) || new Date().toISOString();
 
-    questions.push({
+    const qObj: Question = {
       id,
       code,
       subtest,
@@ -198,17 +219,20 @@ function parseGvizTableToQuestions(table: any): Question[] {
       status,
       version,
       createdByName,
-      createdById: 'usr-admin-yusril',
+      createdById: 'usr-admin-dhina',
       createdAt,
       updatedAt,
       tags: [],
       attachments: [],
       reviews: [],
       versions: [],
-    });
+    };
+
+    // If duplicate ID exists in sheet, keep latest
+    questionMap.set(id, qObj);
   });
 
-  return questions;
+  return Array.from(questionMap.values());
 }
 
 // Helper to merge imported questions with local questions without duplicates
@@ -266,14 +290,20 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setTheme((prev) => (prev === 'light' ? 'dark' : 'light'));
   };
 
-  // Users State - ensuring haloyusril is always present
+  // Users State - ensuring all initial default users are always present
   const [users, setUsers] = useState<User[]>(() => {
     try {
       const saved = localStorage.getItem(STORAGE_KEY_USERS);
       if (saved) {
         const parsed: User[] = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.some((u) => u.email === 'haloyusril@tkad.adiwerna')) {
-          return parsed;
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          const map = new Map<string, User>();
+          INITIAL_USERS.forEach((u) => map.set(u.email.toLowerCase(), u));
+          parsed.forEach((u) => {
+            const existing = map.get(u.email.toLowerCase());
+            map.set(u.email.toLowerCase(), existing ? { ...existing, ...u } : u);
+          });
+          return Array.from(map.values());
         }
       }
       return INITIAL_USERS;
@@ -295,12 +325,28 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [currentUser, setCurrentUser] = useState<User>(() => {
     try {
       const savedId = localStorage.getItem(STORAGE_KEY_USER_ID);
-      const found = users.find((u) => u.id === savedId) || users.find((u) => u.email === 'haloyusril@tkad.adiwerna');
+      const found = users.find((u) => u.id === savedId) || users.find((u) => u.email === 'dhina@tkad.adiwerna') || users.find((u) => u.email === 'haloyusril@tkad.adiwerna');
       return found || INITIAL_USERS[0];
     } catch {
       return INITIAL_USERS[0];
     }
   });
+
+  // Track deleted question IDs so GAS can soft-delete / mark them TIDAK_AKTIF in Google Sheets
+  const [deletedQuestionIds, setDeletedQuestionIds] = useState<string[]>(() => {
+    try {
+      const saved = localStorage.getItem('tkad_deleted_q_ids_v3');
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('tkad_deleted_q_ids_v3', JSON.stringify(deletedQuestionIds));
+    } catch {}
+  }, [deletedQuestionIds]);
 
   // Navigation State
   const [activeTab, setActiveTab] = useState<AppTab>('dashboard');
@@ -333,6 +379,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [selectedQuestionId, setSelectedQuestionId] = useState<string | null>(null);
   const [reviewingQuestionId, setReviewingQuestionId] = useState<string | null>(null);
   const [editingQuestionId, setEditingQuestionId] = useState<string | null>(null);
+  const [showChangePasswordModal, setShowChangePasswordModal] = useState<boolean>(false);
+  const [isPasswordChangeForced, setIsPasswordChangeForced] = useState<boolean>(false);
 
   // Initialize Data from LocalStorage (starts clean with zero questions)
   const [questions, setQuestions] = useState<Question[]>(() => {
@@ -393,7 +441,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [spreadsheetId, setSpreadsheetId] = useState<string>(() => {
     try {
       const saved = localStorage.getItem(STORAGE_KEY_SPREADSHEET_ID);
-      if (!saved || saved.trim() === '' || saved === PREV_DEFAULT_SPREADSHEET_ID) {
+      if (!saved || saved.trim() === '' || PREV_DEFAULT_SPREADSHEET_IDS.includes(saved)) {
         return DEFAULT_SPREADSHEET_ID;
       }
       return saved;
@@ -517,6 +565,57 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   };
 
+  // Helper to get normalized department category for user ('Bahasa Indonesia' | 'Matematika' | 'IPAS' | null for admin)
+  const getUserDepartmentCategory = (user: User): string | null => {
+    if (user.role === 'admin') return null; // Admin has universal access
+    const dept = user.department || '';
+    if (/matematika/i.test(dept)) return 'Matematika';
+    if (/bahasa\s*indonesia/i.test(dept)) return 'Bahasa Indonesia';
+    if (/ipas/i.test(dept)) return 'IPAS';
+    return dept.trim() || null;
+  };
+
+  // Helper to check whether user is authorized for a specific subtest/subject
+  const isUserAuthorizedForSubtest = (user: User, subtest: string): boolean => {
+    if (user.role === 'admin') return true;
+    const userCat = getUserDepartmentCategory(user);
+    if (!userCat) return true;
+    return subtest.trim().toLowerCase() === userCat.trim().toLowerCase();
+  };
+
+  // Helper to check whether user can edit a question
+  const canUserEditQuestion = (user: User, question: Question): { allowed: boolean; reason?: string } => {
+    if (user.role === 'admin') return { allowed: true };
+    if (user.role === 'reviewer') {
+      return {
+        allowed: false,
+        reason: 'Reviewer bertugas meninjau dan memberi catatan mutu naskah, bukan mengedit langsung.',
+      };
+    }
+    // Pembuat Soal
+    const isOwner = question.createdById === user.id || question.createdByName === user.name;
+    if (!isOwner) {
+      return {
+        allowed: false,
+        reason: `Soal ini disusun oleh ${question.createdByName}. Anda hanya dapat mengedit butir soal buatan Anda sendiri.`,
+      };
+    }
+    if (question.status === 'menunggu_review') {
+      return {
+        allowed: false,
+        reason: 'Soal sedang berada dalam antrean review dan dikunci sementara dari perubahan.',
+      };
+    }
+    if (question.status === 'disetujui') {
+      return {
+        allowed: false,
+        reason: 'Soal telah berstatus disetujui (resmi) dan dikunci dari pengeditan.',
+      };
+    }
+    // Draft, perlu_revisi, ditolak
+    return { allowed: true };
+  };
+
   // When user role changes or tab is not allowed, route to dashboard
   useEffect(() => {
     const allowed = getAllowedTabs(currentUser.role);
@@ -597,35 +696,94 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setCurrentUser(user);
     setIsAuthenticated(true);
     addAuditLog('LOGIN', `Pengguna ${user.name} berhasil masuk sebagai ${user.role.toUpperCase()}`);
+
+    // Cek apakah akun masih menggunakan kata sandi default (password123 atau isDefaultPassword: true)
+    const isDefault = user.isDefaultPassword === true || user.password === 'password123' || !user.password;
+    if (isDefault) {
+      setIsPasswordChangeForced(true);
+      setShowChangePasswordModal(true);
+    } else {
+      setIsPasswordChangeForced(false);
+      setShowChangePasswordModal(false);
+    }
+
     return { success: true, message: `Selamat datang, ${user.name}!` };
   };
 
   const logout = () => {
     addAuditLog('LOGOUT', `Pengguna ${currentUser.name} keluar dari sistem.`);
     setIsAuthenticated(false);
+    setShowChangePasswordModal(false);
+    setIsPasswordChangeForced(false);
   };
 
-  // User Management CRUD
-  const addUser = (userData: Omit<User, 'id'>): User => {
-    const initials = userData.name
-      .split(' ')
-      .map((w) => w[0])
-      .join('')
-      .slice(0, 2)
-      .toUpperCase();
+  // Change Password for Current User (Auto-Push to Google Sheets)
+  const changePassword = async (oldPassword: string, newPassword: string): Promise<{ success: boolean; message: string }> => {
+    if (!currentUser) {
+      return { success: false, message: 'Tidak ada sesi pengguna aktif.' };
+    }
 
-    const newUser: User = {
-      ...userData,
-      id: `usr-${Date.now()}`,
-      avatar: userData.avatar || initials,
-      status: userData.status || 'aktif',
-      password: userData.password || 'password123',
-      createdAt: new Date().toISOString(),
+    if (currentUser.password && currentUser.password !== oldPassword) {
+      return { success: false, message: 'Kata sandi saat ini / default tidak sesuai.' };
+    }
+
+    if (newPassword.length < 6) {
+      return { success: false, message: 'Kata sandi baru minimal terdiri dari 6 karakter.' };
+    }
+
+    if (newPassword === 'password123' || newPassword === oldPassword) {
+      return { success: false, message: 'Kata sandi baru tidak boleh sama dengan kata sandi default atau kata sandi lama.' };
+    }
+
+    const updatedUser: User = {
+      ...currentUser,
+      password: newPassword,
+      isDefaultPassword: false,
+      passwordChangedAt: new Date().toISOString(),
     };
 
-    setUsers((prev) => [newUser, ...prev]);
-    addAuditLog('CREATE_USER', `Administrator menambahkan pengguna baru: ${newUser.name} (${newUser.role.toUpperCase()})`);
-    return newUser;
+    const newUsers = users.map((u) => (u.id === currentUser.id ? updatedUser : u));
+    setUsers(newUsers);
+    setCurrentUser(updatedUser);
+    setIsPasswordChangeForced(false);
+
+    try {
+      localStorage.setItem(STORAGE_KEY_USERS, JSON.stringify(newUsers));
+    } catch (err) {
+      console.warn('Failed saving users to localStorage:', err);
+    }
+
+    addAuditLog('UPDATE_USER', `Pengguna ${currentUser.name} berhasil memperbarui kata sandi default.`);
+    addNotification(
+      currentUser.id,
+      'Kata Sandi Berhasil Diperbarui',
+      'Kata sandi baru Anda telah aktif dan otomatis disinkronkan ke basis data Google Spreadsheet.',
+      'success'
+    );
+
+    // Otomatis push perubahan ke basis data Google Spreadsheet via GAS
+    try {
+      const syncResult = await syncWithGoogleSheets({ silent: false });
+      if (syncResult.success) {
+        return {
+          success: true,
+          message: 'Kata sandi baru berhasil disimpan dan otomatis disinkronkan ke basis data Google Spreadsheet!',
+        };
+      }
+    } catch (err: any) {
+      console.warn('Sync password to GAS error:', err);
+    }
+
+    return {
+      success: true,
+      message: 'Kata sandi baru berhasil disimpan ke sistem.',
+    };
+  };
+
+  // User Management CRUD (Locked Roster: add and delete are locked)
+  const addUser = (_userData: Omit<User, 'id'>): User => {
+    console.warn('Manajemen pengguna dikunci: Penambahan pengguna baru dinonaktifkan.');
+    return currentUser;
   };
 
   const updateUser = (id: string, data: Partial<User>) => {
@@ -642,22 +800,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     addAuditLog('UPDATE_USER', `Administrator memperbarui data pengguna ID: ${id}`);
   };
 
-  const deleteUser = (id: string): { success: boolean; message: string } => {
-    if (currentUser.id === id) {
-      return {
-        success: false,
-        message: 'Tidak dapat menghapus akun yang sedang Anda gunakan untuk login saat ini.',
-      };
-    }
-
-    const target = users.find((u) => u.id === id);
-    if (!target) {
-      return { success: false, message: 'Pengguna tidak ditemukan.' };
-    }
-
-    setUsers((prev) => prev.filter((u) => u.id !== id));
-    addAuditLog('DELETE_USER', `Administrator menghapus pengguna: ${target.name} (${target.email})`);
-    return { success: true, message: `Pengguna ${target.name} berhasil dihapus.` };
+  const deleteUser = (_id: string): { success: boolean; message: string } => {
+    return {
+      success: false,
+      message: 'Manajemen pengguna dikunci: Penghapusan pengguna dinonaktifkan sesuai kebijakan institusi.',
+    };
   };
 
   // Question CRUD & Workflows
@@ -877,7 +1024,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (!q) return;
 
     setQuestions((prev) => prev.filter((item) => item.id !== id));
-    addAuditLog('UPDATE_QUESTION', `Menghapus butir soal ${q.code}`, q.id, q.code);
+    setDeletedQuestionIds((prev) => Array.from(new Set([...prev, id])));
+    addAuditLog('UPDATE_QUESTION', `Menghapus butir soal ${q.code} (Status diubah menjadi TIDAK_AKTIF di basis data Spreadsheet)`, q.id, q.code);
   };
 
   const submitReview = (
@@ -1126,6 +1274,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         spreadsheetId,
         questions,
         users,
+        deletedQuestionIds,
         auditLogs: auditLogs.slice(0, 30),
         timestamp: new Date().toISOString(),
       };
@@ -1239,6 +1388,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return () => clearTimeout(timer);
   }, [users, autoSyncEnabled]);
 
+  const visibleQuestions = React.useMemo(() => {
+    return questions.filter((q) => isUserAuthorizedForSubtest(currentUser, q.subtest));
+  }, [questions, currentUser]);
+
+  const visibleCategories = React.useMemo(() => {
+    if (currentUser.role === 'admin') return categories;
+    const userCat = getUserDepartmentCategory(currentUser);
+    if (!userCat) return categories;
+    return categories.filter((c) => c.name.trim().toLowerCase() === userCat.trim().toLowerCase());
+  }, [categories, currentUser]);
+
   return (
     <AppContext.Provider
       value={{
@@ -1253,13 +1413,21 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         addUser,
         updateUser,
         deleteUser,
-        questions,
-        categories,
+        changePassword,
+        showChangePasswordModal,
+        setShowChangePasswordModal,
+        isPasswordChangeForced,
+        setIsPasswordChangeForced,
+        questions: visibleQuestions,
+        categories: visibleCategories,
         auditLogs,
         notifications,
         activeTab,
         setActiveTab,
         getAllowedTabs,
+        getUserDepartmentCategory,
+        isUserAuthorizedForSubtest,
+        canUserEditQuestion,
         selectedQuestionId,
         setSelectedQuestionId,
         reviewingQuestionId,

@@ -55,17 +55,17 @@ export const DashboardView: React.FC = () => {
             {currentUser.role === 'admin' && (
               <div
                 onClick={() => setActiveTab('gas_sync')}
-                className="inline-flex items-center space-x-1.5 bg-indigo-900/60 hover:bg-indigo-900/80 border border-indigo-400/40 px-3 py-1 rounded-full text-xs font-medium text-indigo-200 cursor-pointer transition"
-                title="Basis Data Aktif: JSON Document Store & Relational SQL Generator"
+                className="inline-flex items-center space-x-1.5 bg-emerald-900/60 hover:bg-emerald-900/80 border border-emerald-400/40 px-3 py-1 rounded-full text-xs font-medium text-emerald-200 cursor-pointer transition"
+                title={`Basis data default: Google Spreadsheet ID ${spreadsheetId}`}
               >
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                <span>Basis Data: JSON & SQL Engine (Aktif)</span>
+                <span>Basis Data: Spreadsheet {spreadsheetId ? spreadsheetId.slice(0, 10) + '...' : 'Default'} (Otomatis Sinkron)</span>
               </div>
             )}
           </div>
 
           <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-white">
-            Pusat Repositori & Penjaminan Mutu Soal TKAD-Adiwerna
+            Pusat Repositori & Penjaminan Mutu Soal TKAD Adiwerna
           </h1>
 
           <p className="text-blue-100 text-xs sm:text-sm leading-relaxed">
@@ -84,7 +84,7 @@ export const DashboardView: React.FC = () => {
               <span>Susun Soal Baru</span>
             </button>
 
-            {pendingReviewCount > 0 && (
+            {currentUser.role !== 'pembuat' && pendingReviewCount > 0 && (
               <button
                 onClick={() => setActiveTab('antrian_review')}
                 className="px-4 py-2.5 rounded-xl bg-blue-700/80 border border-blue-400/30 text-white font-semibold text-xs hover:bg-blue-700 transition flex items-center space-x-2 cursor-pointer"
@@ -137,8 +137,12 @@ export const DashboardView: React.FC = () => {
 
         {/* Metric 3: Menunggu Review */}
         <div
-          onClick={() => setActiveTab('antrian_review')}
-          className="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xs hover:border-amber-400 dark:hover:border-amber-500 transition cursor-pointer relative"
+          onClick={() => {
+            if (currentUser.role !== 'pembuat') {
+              setActiveTab('antrian_review');
+            }
+          }}
+          className={`bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xs transition ${currentUser.role !== 'pembuat' ? 'hover:border-amber-400 dark:hover:border-amber-500 cursor-pointer relative' : ''}`}
         >
           <div className="flex items-center justify-between text-slate-400 dark:text-slate-500 mb-2">
             <span className="text-xs font-bold uppercase tracking-wider text-amber-700 dark:text-amber-400">Menunggu Review</span>
@@ -183,7 +187,7 @@ export const DashboardView: React.FC = () => {
           <div className="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xs space-y-4">
             <div className="flex items-center justify-between">
               <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
-                Distribusi Mata Pelajaran TKAD-Adiwerna
+                Distribusi Mata Pelajaran TKAD Adiwerna
               </h3>
               <span className="text-xs text-slate-400 dark:text-slate-500">{categories.length} Mata Uji</span>
             </div>
@@ -253,13 +257,15 @@ export const DashboardView: React.FC = () => {
                   Antrian Menunggu Review ({pendingQuestions.length})
                 </h3>
               </div>
-              <button
-                onClick={() => setActiveTab('antrian_review')}
-                className="text-xs text-blue-600 dark:text-blue-400 hover:underline font-semibold flex items-center space-x-1 cursor-pointer"
-              >
-                <span>Lihat Semua Antrian</span>
-                <ChevronRight className="w-3.5 h-3.5" />
-              </button>
+              {currentUser.role !== 'pembuat' && (
+                <button
+                  onClick={() => setActiveTab('antrian_review')}
+                  className="text-xs text-blue-600 dark:text-blue-400 hover:underline font-semibold flex items-center space-x-1 cursor-pointer"
+                >
+                  <span>Lihat Semua Antrian</span>
+                  <ChevronRight className="w-3.5 h-3.5" />
+                </button>
+              )}
             </div>
 
             {pendingQuestions.length === 0 ? (
@@ -293,12 +299,14 @@ export const DashboardView: React.FC = () => {
                       >
                         Detail
                       </button>
-                      <button
-                        onClick={() => setReviewingQuestionId(q.id)}
-                        className="px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold transition cursor-pointer"
-                      >
-                        Review
-                      </button>
+                      {currentUser.role !== 'pembuat' && (
+                        <button
+                          onClick={() => setReviewingQuestionId(q.id)}
+                          className="px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold transition cursor-pointer"
+                        >
+                          Review
+                        </button>
+                      )}
                     </div>
                   </div>
                 ))}

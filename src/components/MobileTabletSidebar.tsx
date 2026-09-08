@@ -88,8 +88,8 @@ export const MobileTabletSidebar: React.FC = () => {
     },
     {
       id: 'gas_sync',
-      label: 'Basis Data JSON & SQL',
-      shortLabel: 'DB SQL',
+      label: 'DB Spreadsheet & GAS',
+      shortLabel: 'GAS DB',
       icon: Database,
     },
   ];

@@ -388,7 +388,7 @@ export function generateJSONDatabase(
   auditLogs: AuditLog[]
 ): JSONDatabaseSchema {
   return {
-    system: 'TKAD-Adiwerna Bank Soal Database Engine',
+    system: 'TKAD Adiwerna Database Engine',
     version: '2.5.0-JSON-SQL',
     exportedAt: new Date().toISOString(),
     metadata: {
