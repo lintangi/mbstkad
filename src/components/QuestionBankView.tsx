@@ -53,6 +53,7 @@ export const QuestionBankView: React.FC = () => {
   const [viewMode, setViewMode] = useState<'table' | 'grid'>('table');
   const [isWordExportModalOpen, setIsWordExportModalOpen] = useState<boolean>(false);
   const [isPacketModalOpen, setIsPacketModalOpen] = useState<boolean>(false);
+  const [selectedExportPacketId, setSelectedExportPacketId] = useState<string>('all');
 
   // Checkbox Selection State for Bulk Actions
   const [selectedQuestionIds, setSelectedQuestionIds] = useState<string[]>([]);
@@ -712,8 +713,12 @@ export const QuestionBankView: React.FC = () => {
       {/* Word Document Export Modal */}
       <WordExportModal
         isOpen={isWordExportModalOpen}
-        onClose={() => setIsWordExportModalOpen(false)}
+        onClose={() => {
+          setIsWordExportModalOpen(false);
+          setSelectedExportPacketId('all');
+        }}
         initialSubtest={selectedSubtest}
+        initialPacketId={selectedExportPacketId}
       />
 
       {/* Question Packet Modal */}
@@ -722,6 +727,10 @@ export const QuestionBankView: React.FC = () => {
         onClose={() => setIsPacketModalOpen(false)}
         selectedQuestionIds={selectedQuestionIds}
         onClearSelection={() => setSelectedQuestionIds([])}
+        onExportWord={(packetId) => {
+          setSelectedExportPacketId(packetId);
+          setIsWordExportModalOpen(true);
+        }}
       />
     </div>
   );

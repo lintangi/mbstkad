@@ -3,7 +3,6 @@ import {
   Packer,
   Paragraph,
   TextRun,
-  HeadingLevel,
   Table,
   TableRow,
   TableCell,
@@ -15,15 +14,32 @@ import {
 import { saveAs } from 'file-saver';
 import { Question } from '../types';
 
+export interface PacketExportInfo {
+  id: string;
+  code: string;
+  title: string;
+  targetClass?: string;
+  academicYear?: string;
+  subtest?: string;
+  description?: string;
+  questionIds?: string[];
+}
+
 export interface WordExportConfig {
   documentTitle: string;
   institutionName: string;
   academicYear: string;
+  targetClass?: string;
+  packetFilter: string; // 'all' or packetId
+  packetInfo?: PacketExportInfo;
+  packetQuestionIds?: string[];
   subtestFilter: string; // 'all' or specific subtest name
   statusFilter: string; // 'all' or 'disetujui' etc.
   difficultyFilter: string;
-  includeAnswerKey: boolean; // if true, prints answers & explanations inline or at bottom
+  includeAnswerKey: boolean;
   answerKeyMode: 'inline' | 'end_section' | 'none';
+  includeMatrixTable?: boolean; // Tabel Matriks Kisi-Kisi Soal (Overview Table)
+  includeItemDetailTable?: boolean; // Tabel Detail Spesifikasi per Butir Soal (Per-Item Table)
   timeLimitMinutes?: number;
   generalInstructions?: string;
 }
@@ -31,21 +47,22 @@ export interface WordExportConfig {
 /**
  * Strips raw HTML or markdown tags to clean plain text for Word runs
  */
-function cleanTextForWord(text: string): string {
-  if (!text) return '';
+function cleanTextForWord(text?: string | null): string {
+  if (!text) return '-';
   return text
     .replace(/<[^>]*>/g, '') // remove html tags
     .replace(/&nbsp;/g, ' ')
     .replace(/&amp;/g, '&')
     .replace(/&lt;/g, '<')
     .replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"');
+    .replace(/&quot;/g, '"')
+    .trim() || '-';
 }
 
 /**
  * Formats question type into friendly Indonesian name
  */
-function getQuestionTypeLabel(type: string): string {
+export function getQuestionTypeLabel(type: string): string {
   switch (type) {
     case 'pilihan_ganda':
       return 'Pilihan Ganda';
@@ -60,7 +77,7 @@ function getQuestionTypeLabel(type: string): string {
     case 'esai':
       return 'Uraian / Esai';
     default:
-      return type;
+      return type || 'Pilihan Ganda';
   }
 }
 
@@ -73,6 +90,13 @@ export async function exportQuestionsToWord(
 ): Promise<{ success: boolean; totalExported: number; fileName: string }> {
   // 1. Filter questions based on configuration
   const filtered = allQuestions.filter((q) => {
+    // Filter by packet if specified
+    if (config.packetFilter && config.packetFilter !== 'all') {
+      const matchPacket =
+        (q.packetIds && q.packetIds.includes(config.packetFilter)) ||
+        (config.packetQuestionIds && config.packetQuestionIds.includes(q.id));
+      if (!matchPacket) return false;
+    }
     if (config.subtestFilter !== 'all' && q.subtest !== config.subtestFilter) {
       return false;
     }
@@ -87,9 +111,7 @@ export async function exportQuestionsToWord(
 
   if (filtered.length === 0) {
     throw new Error(
-      `Tidak ditemukan butir soal yang sesuai dengan filter (Mata Pelajaran/Subtes: ${
-        config.subtestFilter === 'all' ? 'Semua' : config.subtestFilter
-      }).`
+      `Tidak ditemukan butir soal yang sesuai dengan kriteria filter yang dipilih.`
     );
   }
 
@@ -125,7 +147,7 @@ export async function exportQuestionsToWord(
               }),
               new Paragraph({
                 alignment: AlignmentType.CENTER,
-                spacing: { after: 80 },
+                spacing: { after: 60 },
                 children: [
                   new TextRun({
                     text: (config.documentTitle || 'NASKAH BUTIR SOAL ASESMEN KOMPETENSI').toUpperCase(),
@@ -136,6 +158,21 @@ export async function exportQuestionsToWord(
                   }),
                 ],
               }),
+              config.packetInfo
+                ? new Paragraph({
+                    alignment: AlignmentType.CENTER,
+                    spacing: { after: 60 },
+                    children: [
+                      new TextRun({
+                        text: `PAKET SOAL: [${config.packetInfo.code}] ${config.packetInfo.title}`.toUpperCase(),
+                        bold: true,
+                        size: 20, // 10pt
+                        font: 'Calibri',
+                        color: '475569',
+                      }),
+                    ],
+                  })
+                : new Paragraph({ spacing: { after: 0 }, children: [] }),
             ],
           }),
         ],
@@ -146,14 +183,10 @@ export async function exportQuestionsToWord(
   docChildren.push(headerTable);
   docChildren.push(new Paragraph({ spacing: { after: 120 } }));
 
-  // 3. METADATA & PETUNJUK PENGERJAAN
+  // 3. METADATA IDENTITAS NASKAH & JADWAL
   const subtestLabel = config.subtestFilter === 'all' ? 'Semua Mata Pelajaran / Subtes' : config.subtestFilter;
-  const statusLabel =
-    config.statusFilter === 'all'
-      ? 'Semua Status'
-      : config.statusFilter === 'disetujui'
-      ? 'Soal Disetujui (Resmi)'
-      : config.statusFilter;
+  const packetDisplay = config.packetInfo ? `[${config.packetInfo.code}] ${config.packetInfo.title}` : 'Seluruh Bank Soal';
+  const targetClassDisplay = config.targetClass || (config.packetInfo ? config.packetInfo.targetClass : '') || 'Semua Kelas';
 
   const metaTable = new Table({
     width: { size: 100, type: WidthType.PERCENTAGE },
@@ -179,8 +212,15 @@ export async function exportQuestionsToWord(
               new Paragraph({
                 spacing: { line: 260 },
                 children: [
-                  new TextRun({ text: 'Tahun Ajaran / Sesi   : ', bold: true, size: 20, font: 'Calibri' }),
-                  new TextRun({ text: config.academicYear || '2025/2026', size: 20, font: 'Calibri' }),
+                  new TextRun({ text: 'Paket Soal Terpilih     : ', bold: true, size: 20, font: 'Calibri' }),
+                  new TextRun({ text: packetDisplay, size: 20, font: 'Calibri', color: config.packetInfo ? '1e40af' : '334155' }),
+                ],
+              }),
+              new Paragraph({
+                spacing: { line: 260 },
+                children: [
+                  new TextRun({ text: 'Tingkat / Kelas Target  : ', bold: true, size: 20, font: 'Calibri' }),
+                  new TextRun({ text: targetClassDisplay, size: 20, font: 'Calibri' }),
                 ],
               }),
             ],
@@ -197,6 +237,13 @@ export async function exportQuestionsToWord(
               new Paragraph({
                 spacing: { line: 260 },
                 children: [
+                  new TextRun({ text: 'Tahun Ajaran / Sesi   : ', bold: true, size: 20, font: 'Calibri' }),
+                  new TextRun({ text: config.academicYear || '2025/2026', size: 20, font: 'Calibri' }),
+                ],
+              }),
+              new Paragraph({
+                spacing: { line: 260 },
+                children: [
                   new TextRun({ text: 'Jumlah Butir Soal     : ', bold: true, size: 20, font: 'Calibri' }),
                   new TextRun({ text: `${filtered.length} Soal`, bold: true, color: '1e40af', size: 20, font: 'Calibri' }),
                 ],
@@ -205,7 +252,11 @@ export async function exportQuestionsToWord(
                 spacing: { line: 260 },
                 children: [
                   new TextRun({ text: 'Waktu Pengerjaan      : ', bold: true, size: 20, font: 'Calibri' }),
-                  new TextRun({ text: config.timeLimitMinutes ? `${config.timeLimitMinutes} Menit` : 'Sesuai Jadwal', size: 20, font: 'Calibri' }),
+                  new TextRun({
+                    text: config.timeLimitMinutes ? `${config.timeLimitMinutes} Menit` : 'Sesuai Jadwal Asesmen',
+                    size: 20,
+                    font: 'Calibri',
+                  }),
                 ],
               }),
             ],
@@ -216,15 +267,296 @@ export async function exportQuestionsToWord(
   });
 
   docChildren.push(metaTable);
-  docChildren.push(new Paragraph({ spacing: { after: 120 } }));
+  docChildren.push(new Paragraph({ spacing: { after: 140 } }));
 
-  // Petunjuk Umum
+  // 4. TABEL MATRIKS SPESIFIKASI & KISI-KISI NASKAH SOAL (OVERVIEW MATRIX TABLE)
+  if (config.includeMatrixTable !== false) {
+    docChildren.push(
+      new Paragraph({
+        spacing: { before: 100, after: 80 },
+        children: [
+          new TextRun({
+            text: 'TABEL MATRIKS SPESIFIKASI & KISI-KISI BUTIR SOAL',
+            bold: true,
+            size: 22,
+            font: 'Calibri',
+            color: '1e40af',
+          }),
+        ],
+      })
+    );
+
+    // Matrix Header Row
+    const matrixHeaderRow = new TableRow({
+      tableHeader: true,
+      children: [
+        new TableCell({
+          width: { size: 6, type: WidthType.PERCENTAGE },
+          shading: { fill: '1E3A8A' },
+          borders: {
+            top: { style: BorderStyle.SINGLE, size: 4, color: '0F172A' },
+            bottom: { style: BorderStyle.SINGLE, size: 6, color: '0F172A' },
+            left: { style: BorderStyle.SINGLE, size: 4, color: '0F172A' },
+            right: { style: BorderStyle.SINGLE, size: 4, color: '0F172A' },
+          },
+          children: [
+            new Paragraph({
+              alignment: AlignmentType.CENTER,
+              spacing: { before: 60, after: 60 },
+              children: [new TextRun({ text: 'No.', bold: true, size: 18, color: 'FFFFFF', font: 'Calibri' })],
+            }),
+          ],
+        }),
+        new TableCell({
+          width: { size: 18, type: WidthType.PERCENTAGE },
+          shading: { fill: '1E3A8A' },
+          borders: {
+            top: { style: BorderStyle.SINGLE, size: 4, color: '0F172A' },
+            bottom: { style: BorderStyle.SINGLE, size: 6, color: '0F172A' },
+            left: { style: BorderStyle.SINGLE, size: 4, color: '0F172A' },
+            right: { style: BorderStyle.SINGLE, size: 4, color: '0F172A' },
+          },
+          children: [
+            new Paragraph({
+              alignment: AlignmentType.CENTER,
+              spacing: { before: 60, after: 60 },
+              children: [new TextRun({ text: 'Elemen / Materi', bold: true, size: 18, color: 'FFFFFF', font: 'Calibri' })],
+            }),
+          ],
+        }),
+        new TableCell({
+          width: { size: 18, type: WidthType.PERCENTAGE },
+          shading: { fill: '1E3A8A' },
+          borders: {
+            top: { style: BorderStyle.SINGLE, size: 4, color: '0F172A' },
+            bottom: { style: BorderStyle.SINGLE, size: 6, color: '0F172A' },
+            left: { style: BorderStyle.SINGLE, size: 4, color: '0F172A' },
+            right: { style: BorderStyle.SINGLE, size: 4, color: '0F172A' },
+          },
+          children: [
+            new Paragraph({
+              alignment: AlignmentType.CENTER,
+              spacing: { before: 60, after: 60 },
+              children: [new TextRun({ text: 'Sub-elemen / Submateri', bold: true, size: 18, color: 'FFFFFF', font: 'Calibri' })],
+            }),
+          ],
+        }),
+        new TableCell({
+          width: { size: 28, type: WidthType.PERCENTAGE },
+          shading: { fill: '1E3A8A' },
+          borders: {
+            top: { style: BorderStyle.SINGLE, size: 4, color: '0F172A' },
+            bottom: { style: BorderStyle.SINGLE, size: 6, color: '0F172A' },
+            left: { style: BorderStyle.SINGLE, size: 4, color: '0F172A' },
+            right: { style: BorderStyle.SINGLE, size: 4, color: '0F172A' },
+          },
+          children: [
+            new Paragraph({
+              alignment: AlignmentType.CENTER,
+              spacing: { before: 60, after: 60 },
+              children: [new TextRun({ text: 'Kompetensi (Indikator Soal)', bold: true, size: 18, color: 'FFFFFF', font: 'Calibri' })],
+            }),
+          ],
+        }),
+        new TableCell({
+          width: { size: 15, type: WidthType.PERCENTAGE },
+          shading: { fill: '1E3A8A' },
+          borders: {
+            top: { style: BorderStyle.SINGLE, size: 4, color: '0F172A' },
+            bottom: { style: BorderStyle.SINGLE, size: 6, color: '0F172A' },
+            left: { style: BorderStyle.SINGLE, size: 4, color: '0F172A' },
+            right: { style: BorderStyle.SINGLE, size: 4, color: '0F172A' },
+          },
+          children: [
+            new Paragraph({
+              alignment: AlignmentType.CENTER,
+              spacing: { before: 60, after: 60 },
+              children: [new TextRun({ text: 'Level Kognitif', bold: true, size: 18, color: 'FFFFFF', font: 'Calibri' })],
+            }),
+          ],
+        }),
+        new TableCell({
+          width: { size: 15, type: WidthType.PERCENTAGE },
+          shading: { fill: '1E3A8A' },
+          borders: {
+            top: { style: BorderStyle.SINGLE, size: 4, color: '0F172A' },
+            bottom: { style: BorderStyle.SINGLE, size: 6, color: '0F172A' },
+            left: { style: BorderStyle.SINGLE, size: 4, color: '0F172A' },
+            right: { style: BorderStyle.SINGLE, size: 4, color: '0F172A' },
+          },
+          children: [
+            new Paragraph({
+              alignment: AlignmentType.CENTER,
+              spacing: { before: 60, after: 60 },
+              children: [new TextRun({ text: 'Bentuk Soal', bold: true, size: 18, color: 'FFFFFF', font: 'Calibri' })],
+            }),
+          ],
+        }),
+      ],
+    });
+
+    const matrixDataRows = filtered.map((q, idx) => {
+      const isEven = idx % 2 === 1;
+      const rowBg = isEven ? 'F8FAFC' : 'FFFFFF';
+
+      return new TableRow({
+        children: [
+          new TableCell({
+            width: { size: 6, type: WidthType.PERCENTAGE },
+            shading: { fill: rowBg },
+            borders: {
+              top: { style: BorderStyle.SINGLE, size: 4, color: 'E2E8F0' },
+              bottom: { style: BorderStyle.SINGLE, size: 4, color: 'E2E8F0' },
+              left: { style: BorderStyle.SINGLE, size: 4, color: 'CBD5E1' },
+              right: { style: BorderStyle.SINGLE, size: 4, color: 'CBD5E1' },
+            },
+            children: [
+              new Paragraph({
+                alignment: AlignmentType.CENTER,
+                spacing: { before: 40, after: 40 },
+                children: [new TextRun({ text: `${idx + 1}`, bold: true, size: 17, font: 'Calibri' })],
+              }),
+            ],
+          }),
+          new TableCell({
+            width: { size: 18, type: WidthType.PERCENTAGE },
+            shading: { fill: rowBg },
+            borders: {
+              top: { style: BorderStyle.SINGLE, size: 4, color: 'E2E8F0' },
+              bottom: { style: BorderStyle.SINGLE, size: 4, color: 'E2E8F0' },
+              left: { style: BorderStyle.SINGLE, size: 4, color: 'CBD5E1' },
+              right: { style: BorderStyle.SINGLE, size: 4, color: 'CBD5E1' },
+            },
+            children: [
+              new Paragraph({
+                spacing: { before: 40, after: 40 },
+                children: [
+                  new TextRun({
+                    text: cleanTextForWord(q.element || q.topic || 'Umum'),
+                    size: 17,
+                    font: 'Calibri',
+                    bold: true,
+                    color: '1E293B',
+                  }),
+                ],
+              }),
+            ],
+          }),
+          new TableCell({
+            width: { size: 18, type: WidthType.PERCENTAGE },
+            shading: { fill: rowBg },
+            borders: {
+              top: { style: BorderStyle.SINGLE, size: 4, color: 'E2E8F0' },
+              bottom: { style: BorderStyle.SINGLE, size: 4, color: 'E2E8F0' },
+              left: { style: BorderStyle.SINGLE, size: 4, color: 'CBD5E1' },
+              right: { style: BorderStyle.SINGLE, size: 4, color: 'CBD5E1' },
+            },
+            children: [
+              new Paragraph({
+                spacing: { before: 40, after: 40 },
+                children: [
+                  new TextRun({
+                    text: cleanTextForWord(q.subElement || '-'),
+                    size: 17,
+                    font: 'Calibri',
+                    color: '334155',
+                  }),
+                ],
+              }),
+            ],
+          }),
+          new TableCell({
+            width: { size: 28, type: WidthType.PERCENTAGE },
+            shading: { fill: rowBg },
+            borders: {
+              top: { style: BorderStyle.SINGLE, size: 4, color: 'E2E8F0' },
+              bottom: { style: BorderStyle.SINGLE, size: 4, color: 'E2E8F0' },
+              left: { style: BorderStyle.SINGLE, size: 4, color: 'CBD5E1' },
+              right: { style: BorderStyle.SINGLE, size: 4, color: 'CBD5E1' },
+            },
+            children: [
+              new Paragraph({
+                spacing: { before: 40, after: 40 },
+                children: [
+                  new TextRun({
+                    text: cleanTextForWord(q.competency || '-'),
+                    size: 17,
+                    font: 'Calibri',
+                    color: '334155',
+                  }),
+                ],
+              }),
+            ],
+          }),
+          new TableCell({
+            width: { size: 15, type: WidthType.PERCENTAGE },
+            shading: { fill: rowBg },
+            borders: {
+              top: { style: BorderStyle.SINGLE, size: 4, color: 'E2E8F0' },
+              bottom: { style: BorderStyle.SINGLE, size: 4, color: 'E2E8F0' },
+              left: { style: BorderStyle.SINGLE, size: 4, color: 'CBD5E1' },
+              right: { style: BorderStyle.SINGLE, size: 4, color: 'CBD5E1' },
+            },
+            children: [
+              new Paragraph({
+                alignment: AlignmentType.CENTER,
+                spacing: { before: 40, after: 40 },
+                children: [
+                  new TextRun({
+                    text: cleanTextForWord(q.cognitiveLevel || '-'),
+                    size: 17,
+                    font: 'Calibri',
+                    bold: true,
+                    color: '0369A1',
+                  }),
+                ],
+              }),
+            ],
+          }),
+          new TableCell({
+            width: { size: 15, type: WidthType.PERCENTAGE },
+            shading: { fill: rowBg },
+            borders: {
+              top: { style: BorderStyle.SINGLE, size: 4, color: 'E2E8F0' },
+              bottom: { style: BorderStyle.SINGLE, size: 4, color: 'E2E8F0' },
+              left: { style: BorderStyle.SINGLE, size: 4, color: 'CBD5E1' },
+              right: { style: BorderStyle.SINGLE, size: 4, color: 'CBD5E1' },
+            },
+            children: [
+              new Paragraph({
+                alignment: AlignmentType.CENTER,
+                spacing: { before: 40, after: 40 },
+                children: [
+                  new TextRun({
+                    text: getQuestionTypeLabel(q.type),
+                    size: 17,
+                    font: 'Calibri',
+                    color: '1E293B',
+                  }),
+                ],
+              }),
+            ],
+          }),
+        ],
+      });
+    });
+
+    const fullMatrixTable = new Table({
+      width: { size: 100, type: WidthType.PERCENTAGE },
+      rows: [matrixHeaderRow, ...matrixDataRows],
+    });
+
+    docChildren.push(fullMatrixTable);
+    docChildren.push(new Paragraph({ spacing: { after: 180 } }));
+  }
+
+  // 5. PETUNJUK PENGERJAAN UMUM
   if (config.generalInstructions) {
     docChildren.push(
       new Paragraph({
         children: [
           new TextRun({
-            text: 'PETUNJUK UMUM:',
+            text: 'PETUNJUK UMUM PENGERJAAN ASESMEN:',
             bold: true,
             size: 20,
             font: 'Calibri',
@@ -249,15 +581,298 @@ export async function exportQuestionsToWord(
     );
   }
 
-  // 4. LOOP ITEMS (QUESTIONS)
+  // Section divider before Question Items
+  docChildren.push(
+    new Paragraph({
+      spacing: { before: 120, after: 120 },
+      children: [
+        new TextRun({
+          text: 'DAFTAR NASKAH BUTIR SOAL UJIAN',
+          bold: true,
+          size: 22,
+          font: 'Calibri',
+          color: '1E40AF',
+        }),
+      ],
+    })
+  );
+
+  // 6. LOOP QUESTIONS WITH SPECIFICATION TABLE & PROMPT
   filtered.forEach((q, idx) => {
     const questionNumber = idx + 1;
     const cleanPrompt = cleanTextForWord(q.prompt);
 
+    // Detail Specification Table for each question item (6 required elements in Table format)
+    if (config.includeItemDetailTable !== false) {
+      const itemDetailTable = new Table({
+        width: { size: 100, type: WidthType.PERCENTAGE },
+        rows: [
+          new TableRow({
+            children: [
+              new TableCell({
+                width: { size: 20, type: WidthType.PERCENTAGE },
+                shading: { fill: 'F1F5F9' },
+                borders: {
+                  top: { style: BorderStyle.SINGLE, size: 4, color: 'CBD5E1' },
+                  bottom: { style: BorderStyle.SINGLE, size: 4, color: 'CBD5E1' },
+                  left: { style: BorderStyle.SINGLE, size: 4, color: 'CBD5E1' },
+                  right: { style: BorderStyle.SINGLE, size: 4, color: 'CBD5E1' },
+                },
+                children: [
+                  new Paragraph({
+                    spacing: { before: 30, after: 30 },
+                    children: [
+                      new TextRun({ text: '1. Nomor Soal', bold: true, size: 17, font: 'Calibri', color: '1E293B' }),
+                    ],
+                  }),
+                ],
+              }),
+              new TableCell({
+                width: { size: 30, type: WidthType.PERCENTAGE },
+                borders: {
+                  top: { style: BorderStyle.SINGLE, size: 4, color: 'CBD5E1' },
+                  bottom: { style: BorderStyle.SINGLE, size: 4, color: 'CBD5E1' },
+                  left: { style: BorderStyle.SINGLE, size: 4, color: 'CBD5E1' },
+                  right: { style: BorderStyle.SINGLE, size: 4, color: 'CBD5E1' },
+                },
+                children: [
+                  new Paragraph({
+                    spacing: { before: 30, after: 30 },
+                    children: [
+                      new TextRun({
+                        text: `Soal No. ${questionNumber} (${q.code})`,
+                        bold: true,
+                        size: 17,
+                        font: 'Calibri',
+                        color: '1E40AF',
+                      }),
+                    ],
+                  }),
+                ],
+              }),
+              new TableCell({
+                width: { size: 20, type: WidthType.PERCENTAGE },
+                shading: { fill: 'F1F5F9' },
+                borders: {
+                  top: { style: BorderStyle.SINGLE, size: 4, color: 'CBD5E1' },
+                  bottom: { style: BorderStyle.SINGLE, size: 4, color: 'CBD5E1' },
+                  left: { style: BorderStyle.SINGLE, size: 4, color: 'CBD5E1' },
+                  right: { style: BorderStyle.SINGLE, size: 4, color: 'CBD5E1' },
+                },
+                children: [
+                  new Paragraph({
+                    spacing: { before: 30, after: 30 },
+                    children: [
+                      new TextRun({ text: '6. Bentuk Soal', bold: true, size: 17, font: 'Calibri', color: '1E293B' }),
+                    ],
+                  }),
+                ],
+              }),
+              new TableCell({
+                width: { size: 30, type: WidthType.PERCENTAGE },
+                borders: {
+                  top: { style: BorderStyle.SINGLE, size: 4, color: 'CBD5E1' },
+                  bottom: { style: BorderStyle.SINGLE, size: 4, color: 'CBD5E1' },
+                  left: { style: BorderStyle.SINGLE, size: 4, color: 'CBD5E1' },
+                  right: { style: BorderStyle.SINGLE, size: 4, color: 'CBD5E1' },
+                },
+                children: [
+                  new Paragraph({
+                    spacing: { before: 30, after: 30 },
+                    children: [
+                      new TextRun({ text: getQuestionTypeLabel(q.type), size: 17, font: 'Calibri', color: '334155' }),
+                    ],
+                  }),
+                ],
+              }),
+            ],
+          }),
+          new TableRow({
+            children: [
+              new TableCell({
+                width: { size: 20, type: WidthType.PERCENTAGE },
+                shading: { fill: 'F8FAFC' },
+                borders: {
+                  top: { style: BorderStyle.SINGLE, size: 4, color: 'CBD5E1' },
+                  bottom: { style: BorderStyle.SINGLE, size: 4, color: 'CBD5E1' },
+                  left: { style: BorderStyle.SINGLE, size: 4, color: 'CBD5E1' },
+                  right: { style: BorderStyle.SINGLE, size: 4, color: 'CBD5E1' },
+                },
+                children: [
+                  new Paragraph({
+                    spacing: { before: 30, after: 30 },
+                    children: [
+                      new TextRun({ text: '2. Elemen / Materi', bold: true, size: 17, font: 'Calibri', color: '1E293B' }),
+                    ],
+                  }),
+                ],
+              }),
+              new TableCell({
+                width: { size: 30, type: WidthType.PERCENTAGE },
+                borders: {
+                  top: { style: BorderStyle.SINGLE, size: 4, color: 'CBD5E1' },
+                  bottom: { style: BorderStyle.SINGLE, size: 4, color: 'CBD5E1' },
+                  left: { style: BorderStyle.SINGLE, size: 4, color: 'CBD5E1' },
+                  right: { style: BorderStyle.SINGLE, size: 4, color: 'CBD5E1' },
+                },
+                children: [
+                  new Paragraph({
+                    spacing: { before: 30, after: 30 },
+                    children: [
+                      new TextRun({
+                        text: cleanTextForWord(q.element || q.topic || 'Umum'),
+                        size: 17,
+                        font: 'Calibri',
+                        color: '334155',
+                      }),
+                    ],
+                  }),
+                ],
+              }),
+              new TableCell({
+                width: { size: 20, type: WidthType.PERCENTAGE },
+                shading: { fill: 'F8FAFC' },
+                borders: {
+                  top: { style: BorderStyle.SINGLE, size: 4, color: 'CBD5E1' },
+                  bottom: { style: BorderStyle.SINGLE, size: 4, color: 'CBD5E1' },
+                  left: { style: BorderStyle.SINGLE, size: 4, color: 'CBD5E1' },
+                  right: { style: BorderStyle.SINGLE, size: 4, color: 'CBD5E1' },
+                },
+                children: [
+                  new Paragraph({
+                    spacing: { before: 30, after: 30 },
+                    children: [
+                      new TextRun({
+                        text: '3. Sub-elemen / Submateri',
+                        bold: true,
+                        size: 17,
+                        font: 'Calibri',
+                        color: '1E293B',
+                      }),
+                    ],
+                  }),
+                ],
+              }),
+              new TableCell({
+                width: { size: 30, type: WidthType.PERCENTAGE },
+                borders: {
+                  top: { style: BorderStyle.SINGLE, size: 4, color: 'CBD5E1' },
+                  bottom: { style: BorderStyle.SINGLE, size: 4, color: 'CBD5E1' },
+                  left: { style: BorderStyle.SINGLE, size: 4, color: 'CBD5E1' },
+                  right: { style: BorderStyle.SINGLE, size: 4, color: 'CBD5E1' },
+                },
+                children: [
+                  new Paragraph({
+                    spacing: { before: 30, after: 30 },
+                    children: [
+                      new TextRun({
+                        text: cleanTextForWord(q.subElement || '-'),
+                        size: 17,
+                        font: 'Calibri',
+                        color: '334155',
+                      }),
+                    ],
+                  }),
+                ],
+              }),
+            ],
+          }),
+          new TableRow({
+            children: [
+              new TableCell({
+                width: { size: 20, type: WidthType.PERCENTAGE },
+                shading: { fill: 'F1F5F9' },
+                borders: {
+                  top: { style: BorderStyle.SINGLE, size: 4, color: 'CBD5E1' },
+                  bottom: { style: BorderStyle.SINGLE, size: 4, color: 'CBD5E1' },
+                  left: { style: BorderStyle.SINGLE, size: 4, color: 'CBD5E1' },
+                  right: { style: BorderStyle.SINGLE, size: 4, color: 'CBD5E1' },
+                },
+                children: [
+                  new Paragraph({
+                    spacing: { before: 30, after: 30 },
+                    children: [
+                      new TextRun({ text: '4. Kompetensi', bold: true, size: 17, font: 'Calibri', color: '1E293B' }),
+                    ],
+                  }),
+                ],
+              }),
+              new TableCell({
+                width: { size: 30, type: WidthType.PERCENTAGE },
+                borders: {
+                  top: { style: BorderStyle.SINGLE, size: 4, color: 'CBD5E1' },
+                  bottom: { style: BorderStyle.SINGLE, size: 4, color: 'CBD5E1' },
+                  left: { style: BorderStyle.SINGLE, size: 4, color: 'CBD5E1' },
+                  right: { style: BorderStyle.SINGLE, size: 4, color: 'CBD5E1' },
+                },
+                children: [
+                  new Paragraph({
+                    spacing: { before: 30, after: 30 },
+                    children: [
+                      new TextRun({
+                        text: cleanTextForWord(q.competency || '-'),
+                        size: 17,
+                        font: 'Calibri',
+                        color: '334155',
+                      }),
+                    ],
+                  }),
+                ],
+              }),
+              new TableCell({
+                width: { size: 20, type: WidthType.PERCENTAGE },
+                shading: { fill: 'F1F5F9' },
+                borders: {
+                  top: { style: BorderStyle.SINGLE, size: 4, color: 'CBD5E1' },
+                  bottom: { style: BorderStyle.SINGLE, size: 4, color: 'CBD5E1' },
+                  left: { style: BorderStyle.SINGLE, size: 4, color: 'CBD5E1' },
+                  right: { style: BorderStyle.SINGLE, size: 4, color: 'CBD5E1' },
+                },
+                children: [
+                  new Paragraph({
+                    spacing: { before: 30, after: 30 },
+                    children: [
+                      new TextRun({ text: '5. Level Kognitif', bold: true, size: 17, font: 'Calibri', color: '1E293B' }),
+                    ],
+                  }),
+                ],
+              }),
+              new TableCell({
+                width: { size: 30, type: WidthType.PERCENTAGE },
+                borders: {
+                  top: { style: BorderStyle.SINGLE, size: 4, color: 'CBD5E1' },
+                  bottom: { style: BorderStyle.SINGLE, size: 4, color: 'CBD5E1' },
+                  left: { style: BorderStyle.SINGLE, size: 4, color: 'CBD5E1' },
+                  right: { style: BorderStyle.SINGLE, size: 4, color: 'CBD5E1' },
+                },
+                children: [
+                  new Paragraph({
+                    spacing: { before: 30, after: 30 },
+                    children: [
+                      new TextRun({
+                        text: cleanTextForWord(q.cognitiveLevel || '-'),
+                        bold: true,
+                        size: 17,
+                        font: 'Calibri',
+                        color: '0369A1',
+                      }),
+                    ],
+                  }),
+                ],
+              }),
+            ],
+          }),
+        ],
+      });
+
+      docChildren.push(new Paragraph({ spacing: { before: 140 } }));
+      docChildren.push(itemDetailTable);
+    }
+
     // Number & Prompt Paragraph
     docChildren.push(
       new Paragraph({
-        spacing: { before: 180, after: 80 },
+        spacing: { before: 80, after: 80 },
         indent: { left: convertInchesToTwip(0.3), hanging: convertInchesToTwip(0.3) },
         children: [
           new TextRun({
@@ -458,7 +1073,7 @@ export async function exportQuestionsToWord(
     }
   });
 
-  // 5. SEPARATE END ANSWER KEY SECTION (If requested)
+  // 7. SEPARATE END ANSWER KEY SECTION (If requested)
   if (config.answerKeyMode === 'end_section' && config.includeAnswerKey) {
     docChildren.push(
       new Paragraph({
@@ -497,7 +1112,14 @@ export async function exportQuestionsToWord(
           children: [
             new TextRun({ text: `No. ${qNum} [${q.code}] : `, bold: true, size: 21, font: 'Calibri' }),
             new TextRun({ text: `Kunci: ${keyText} `, bold: true, color: '059669', size: 21, font: 'Calibri' }),
-            new TextRun({ text: `(Bobot: ${q.defaultScore || 1} | Kesulitan: ${q.difficulty})`, size: 19, font: 'Calibri', color: '64748b' }),
+            new TextRun({
+              text: `(Elemen: ${cleanTextForWord(q.element || q.topic)} | Kognitif: ${cleanTextForWord(
+                q.cognitiveLevel
+              )} | Bentuk: ${getQuestionTypeLabel(q.type)})`,
+              size: 19,
+              font: 'Calibri',
+              color: '64748b',
+            }),
           ],
         })
       );
@@ -517,7 +1139,7 @@ export async function exportQuestionsToWord(
     });
   }
 
-  // 6. BUILD DOCUMENT AND DOWNLOAD
+  // 8. BUILD DOCUMENT AND DOWNLOAD
   const doc = new Document({
     sections: [
       {
@@ -537,10 +1159,11 @@ export async function exportQuestionsToWord(
   });
 
   const blob = await Packer.toBlob(doc);
+  const cleanPacketSlug = config.packetInfo ? config.packetInfo.code.toLowerCase().replace(/[^a-z0-9]/g, '_') : '';
   const cleanSubtestSlug = (config.subtestFilter === 'all' ? 'semua_mapel' : config.subtestFilter)
     .toLowerCase()
     .replace(/[^a-z0-9]/g, '_');
-  const fileName = `naskah_soal_${cleanSubtestSlug}_${Date.now()}.docx`;
+  const fileName = `naskah_soal_${cleanPacketSlug ? cleanPacketSlug + '_' : ''}${cleanSubtestSlug}_${Date.now()}.docx`;
 
   saveAs(blob, fileName);
 

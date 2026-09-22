@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   FileText,
   Download,
@@ -6,12 +6,12 @@ import {
   CheckCircle2,
   Filter,
   Layers,
-  Clock,
   School,
-  Settings,
   AlertCircle,
-  HelpCircle,
   Check,
+  Package,
+  Table as TableIcon,
+  Sparkles,
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { exportQuestionsToWord, WordExportConfig } from '../utils/wordExport';
@@ -20,23 +20,29 @@ interface WordExportModalProps {
   isOpen: boolean;
   onClose: () => void;
   initialSubtest?: string;
+  initialPacketId?: string;
 }
 
 export const WordExportModal: React.FC<WordExportModalProps> = ({
   isOpen,
   onClose,
   initialSubtest = 'all',
+  initialPacketId = 'all',
 }) => {
-  const { questions, categories, logAudit } = useApp();
+  const { questions, categories, packets, logAudit } = useApp();
 
   const [documentTitle, setDocumentTitle] = useState('NASKAH SOAL ASESMEN KOMPETENSI TKAD-ADIWERNA');
   const [institutionName, setInstitutionName] = useState('TIM PENGEMBANG BANK SOAL TKAD-ADIWERNA');
   const [academicYear, setAcademicYear] = useState('2025/2026');
+  const [targetClass, setTargetClass] = useState('Semua Kelas');
+  const [packetFilter, setPacketFilter] = useState<string>(initialPacketId || 'all');
   const [subtestFilter, setSubtestFilter] = useState<string>(initialSubtest);
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [difficultyFilter, setDifficultyFilter] = useState<string>('all');
   const [timeLimitMinutes, setTimeLimitMinutes] = useState<number>(90);
   const [answerKeyMode, setAnswerKeyMode] = useState<'inline' | 'end_section' | 'none'>('none');
+  const [includeMatrixTable, setIncludeMatrixTable] = useState<boolean>(true);
+  const [includeItemDetailTable, setIncludeItemDetailTable] = useState<boolean>(true);
   const [generalInstructions, setGeneralInstructions] = useState(
     '1. Berdoalah sebelum mengerjakan soal. 2. Pilihlah satu jawaban yang paling tepat dengan menghitamkan bulatan pada lembar jawaban. 3. Periksa kembali pekerjaan Anda sebelum diserahkan.'
   );
@@ -45,12 +51,66 @@ export const WordExportModal: React.FC<WordExportModalProps> = ({
   const [exportSuccessMsg, setExportSuccessMsg] = useState<string | null>(null);
   const [exportErrorMsg, setExportErrorMsg] = useState<string | null>(null);
 
+  // Synchronize when initialPacketId or initialSubtest changes when opening modal
+  useEffect(() => {
+    if (isOpen) {
+      if (initialPacketId && initialPacketId !== 'all') {
+        setPacketFilter(initialPacketId);
+        const pkt = packets.find((p) => p.id === initialPacketId);
+        if (pkt) {
+          if (pkt.subtest) setSubtestFilter(pkt.subtest);
+          if (pkt.academicYear) setAcademicYear(pkt.academicYear);
+          if (pkt.targetClass) setTargetClass(pkt.targetClass);
+          setDocumentTitle(`NASKAH ASESMEN - ${pkt.title.toUpperCase()}`);
+        }
+      } else {
+        if (initialSubtest) setSubtestFilter(initialSubtest);
+      }
+    }
+  }, [isOpen, initialPacketId, initialSubtest, packets]);
+
+  // Active selected packet details
+  const selectedPacket = useMemo(() => {
+    if (packetFilter === 'all') return null;
+    return packets.find((p) => p.id === packetFilter) || null;
+  }, [packetFilter, packets]);
+
+  // Handle packet selection change with auto-fill enhancements
+  const handlePacketChange = (newPacketId: string) => {
+    setPacketFilter(newPacketId);
+    if (newPacketId !== 'all') {
+      const pkt = packets.find((p) => p.id === newPacketId);
+      if (pkt) {
+        if (pkt.subtest) {
+          setSubtestFilter(pkt.subtest);
+        }
+        if (pkt.academicYear) {
+          setAcademicYear(pkt.academicYear);
+        }
+        if (pkt.targetClass) {
+          setTargetClass(pkt.targetClass);
+        }
+        setDocumentTitle(`NASKAH ASESMEN - ${pkt.title.toUpperCase()}`);
+      }
+    } else {
+      setDocumentTitle('NASKAH SOAL ASESMEN KOMPETENSI TKAD-ADIWERNA');
+    }
+  };
+
   // Available subtests list with counts
   const subtestStats = useMemo(() => {
     const list: { name: string; count: number }[] = [];
     const map = new Map<string, number>();
 
-    questions.forEach((q) => {
+    // If packet filter is active, only count subtests within that packet
+    const pool = packetFilter === 'all'
+      ? questions
+      : questions.filter((q) => {
+          const pkt = packets.find((p) => p.id === packetFilter);
+          return (q.packetIds && q.packetIds.includes(packetFilter)) || (pkt && pkt.questionIds.includes(q.id));
+        });
+
+    pool.forEach((q) => {
       const current = map.get(q.subtest) || 0;
       map.set(q.subtest, current + 1);
     });
@@ -66,17 +126,23 @@ export const WordExportModal: React.FC<WordExportModalProps> = ({
     });
 
     return list.sort((a, b) => a.name.localeCompare(b.name));
-  }, [questions, categories]);
+  }, [questions, categories, packetFilter, packets]);
 
   // Count matches
   const matchingQuestionsCount = useMemo(() => {
     return questions.filter((q) => {
+      if (packetFilter !== 'all') {
+        const pkt = packets.find((p) => p.id === packetFilter);
+        const matchPkt =
+          (q.packetIds && q.packetIds.includes(packetFilter)) || (pkt && pkt.questionIds.includes(q.id));
+        if (!matchPkt) return false;
+      }
       if (subtestFilter !== 'all' && q.subtest !== subtestFilter) return false;
       if (statusFilter !== 'all' && q.status !== statusFilter) return false;
       if (difficultyFilter !== 'all' && q.difficulty !== difficultyFilter) return false;
       return true;
     }).length;
-  }, [questions, subtestFilter, statusFilter, difficultyFilter]);
+  }, [questions, packetFilter, packets, subtestFilter, statusFilter, difficultyFilter]);
 
   if (!isOpen) return null;
 
@@ -90,11 +156,28 @@ export const WordExportModal: React.FC<WordExportModalProps> = ({
         documentTitle,
         institutionName,
         academicYear,
+        targetClass: targetClass.trim() || undefined,
+        packetFilter,
+        packetInfo: selectedPacket
+          ? {
+              id: selectedPacket.id,
+              code: selectedPacket.code,
+              title: selectedPacket.title,
+              targetClass: selectedPacket.targetClass,
+              academicYear: selectedPacket.academicYear,
+              subtest: selectedPacket.subtest,
+              description: selectedPacket.description,
+              questionIds: selectedPacket.questionIds,
+            }
+          : undefined,
+        packetQuestionIds: selectedPacket ? selectedPacket.questionIds : undefined,
         subtestFilter,
         statusFilter,
         difficultyFilter,
         includeAnswerKey: answerKeyMode !== 'none',
         answerKeyMode,
+        includeMatrixTable,
+        includeItemDetailTable,
         timeLimitMinutes: timeLimitMinutes > 0 ? timeLimitMinutes : undefined,
         generalInstructions: generalInstructions.trim() || undefined,
       };
@@ -105,10 +188,14 @@ export const WordExportModal: React.FC<WordExportModalProps> = ({
         'DUPLICATE',
         undefined,
         undefined,
-        `Ekspor naskah soal Word (.docx): ${result.totalExported} butir soal, Subtes: ${subtestFilter}, Mode Kunci: ${answerKeyMode}`
+        `Ekspor naskah soal Word (.docx): ${result.totalExported} butir soal, Paket: ${
+          selectedPacket ? selectedPacket.code : 'Semua'
+        }, Subtes: ${subtestFilter}, Mode Kunci: ${answerKeyMode}`
       );
 
-      setExportSuccessMsg(`Berhasil mengekspor ${result.totalExported} butir soal ke file "${result.fileName}"!`);
+      setExportSuccessMsg(
+        `Berhasil membuat file Microsoft Word "${result.fileName}" berisi ${result.totalExported} butir soal lengkap dengan tabel spesifikasi & rincian materi!`
+      );
       setTimeout(() => {
         setIsExporting(false);
       }, 500);
@@ -120,7 +207,7 @@ export const WordExportModal: React.FC<WordExportModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs overflow-y-auto">
-      <div className="relative w-full max-w-2xl bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-800 overflow-hidden my-8 animate-in fade-in zoom-in-95">
+      <div className="relative w-full max-w-3xl bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-800 overflow-hidden my-8 animate-in fade-in zoom-in-95">
         {/* Modal Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 dark:border-slate-800 bg-gradient-to-r from-blue-700 via-blue-600 to-indigo-700 text-white">
           <div className="flex items-center space-x-3">
@@ -130,7 +217,7 @@ export const WordExportModal: React.FC<WordExportModalProps> = ({
             <div>
               <h3 className="text-base font-bold text-white">Ekspor Naskah Soal ke Microsoft Word (.docx)</h3>
               <p className="text-xs text-blue-100/90">
-                Cetak naskah ujian standar dengan tata letak rapi, KOP soal, dan filter mata pelajaran
+                Cetak naskah ujian standar dengan tabel spesifikasi materi, level kognitif, kisi-kisi, & filter paket soal
               </p>
             </div>
           </div>
@@ -159,36 +246,91 @@ export const WordExportModal: React.FC<WordExportModalProps> = ({
             </div>
           )}
 
-          {/* SECTION 1: FILTER MATA PELAJARAN / SUBTES (Primary Feature) */}
-          <div className="bg-blue-50/60 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800/80 rounded-xl p-4 space-y-3">
+          {/* SECTION 1: FILTER PAKET SOAL (NEW FEATURE) */}
+          <div className="bg-indigo-50/70 dark:bg-indigo-950/30 border border-indigo-200 dark:border-indigo-800/80 rounded-xl p-4 space-y-3">
             <div className="flex items-center justify-between">
-              <label className="text-xs font-bold uppercase tracking-wider text-blue-900 dark:text-blue-200 flex items-center space-x-1.5">
-                <Filter className="w-3.5 h-3.5" />
-                <span>Filter Mata Pelajaran / Subtes</span>
+              <label className="text-xs font-bold uppercase tracking-wider text-indigo-900 dark:text-indigo-200 flex items-center space-x-1.5">
+                <Package className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
+                <span>Filter Berdasarkan Paket Soal</span>
               </label>
-              <span className="text-[11px] font-semibold text-blue-700 dark:text-blue-300">
-                Terpilih: {matchingQuestionsCount} butir soal
+              <span className="text-[11px] font-semibold text-indigo-700 dark:text-indigo-300">
+                Tersedia: {packets.length} Paket
               </span>
             </div>
 
             <select
-              value={subtestFilter}
-              onChange={(e) => setSubtestFilter(e.target.value)}
-              className="w-full px-3 py-2.5 bg-white dark:bg-slate-900 border border-blue-300 dark:border-blue-700 rounded-xl text-sm font-medium text-slate-800 dark:text-slate-100 focus:ring-2 focus:ring-blue-500 focus:outline-hidden"
+              value={packetFilter}
+              onChange={(e) => handlePacketChange(e.target.value)}
+              className="w-full px-3 py-2.5 bg-white dark:bg-slate-900 border border-indigo-300 dark:border-indigo-700 rounded-xl text-sm font-semibold text-slate-800 dark:text-slate-100 focus:ring-2 focus:ring-indigo-500 focus:outline-hidden"
             >
-              <option value="all">🌐 Semua Mata Pelajaran / Subtes ({questions.length} Soal)</option>
-              {subtestStats.map((sub) => (
-                <option key={sub.name} value={sub.name}>
-                  📚 {sub.name} ({sub.count} Butir Soal)
+              <option value="all">🌐 Seluruh Bank Soal (Semua Soal / Tanpa Filter Paket)</option>
+              {packets.map((pkt) => (
+                <option key={pkt.id} value={pkt.id}>
+                  📦 [{pkt.code}] {pkt.title} ({pkt.subtest} • {pkt.questionIds.length} Soal • {pkt.targetClass || 'Semua Kelas'})
                 </option>
               ))}
             </select>
 
-            {/* Sub-Filters: Status & Difficulty */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+            {/* Selected Packet Banner Info */}
+            {selectedPacket && (
+              <div className="p-3 bg-white/90 dark:bg-slate-900/90 rounded-xl border border-indigo-100 dark:border-indigo-900/50 text-xs space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <span className="font-bold text-indigo-900 dark:text-indigo-300 flex items-center space-x-1.5">
+                    <Sparkles className="w-3.5 h-3.5 text-indigo-600" />
+                    <span>Paket: [{selectedPacket.code}] {selectedPacket.title}</span>
+                  </span>
+                  <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-indigo-100 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300">
+                    {selectedPacket.questionIds.length} Butir Soal Terdaftar
+                  </span>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-[11px] text-slate-600 dark:text-slate-400 pt-1">
+                  <div><strong>Mapel/Subtes:</strong> {selectedPacket.subtest}</div>
+                  <div><strong>Kelas Target:</strong> {selectedPacket.targetClass || '-'}</div>
+                  <div><strong>Tahun Ajaran:</strong> {selectedPacket.academicYear || '-'}</div>
+                </div>
+                {selectedPacket.description && (
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400 italic pt-0.5">
+                    "{selectedPacket.description}"
+                  </p>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* SECTION 2: FILTER MATA PELAJARAN / SUBTES, STATUS & KESULITAN */}
+          <div className="bg-blue-50/60 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800/80 rounded-xl p-4 space-y-3">
+            <div className="flex items-center justify-between">
+              <label className="text-xs font-bold uppercase tracking-wider text-blue-900 dark:text-blue-200 flex items-center space-x-1.5">
+                <Filter className="w-3.5 h-3.5" />
+                <span>Filter Kriteria Soal</span>
+              </label>
+              <span className="text-[11px] font-bold text-blue-700 dark:text-blue-300">
+                Terpilih: {matchingQuestionsCount} butir soal
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <div>
                 <label className="block text-[11px] font-medium text-slate-600 dark:text-slate-400 mb-1">
-                  Status Kelayakan Soal:
+                  Mata Pelajaran / Subtes:
+                </label>
+                <select
+                  value={subtestFilter}
+                  onChange={(e) => setSubtestFilter(e.target.value)}
+                  className="w-full px-3 py-1.5 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg text-xs font-medium text-slate-800 dark:text-slate-200 focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="all">Semua Mata Pelajaran</option>
+                  {subtestStats.map((sub) => (
+                    <option key={sub.name} value={sub.name}>
+                      📚 {sub.name} ({sub.count} Soal)
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-medium text-slate-600 dark:text-slate-400 mb-1">
+                  Status Kelayakan:
                 </label>
                 <select
                   value={statusFilter}
@@ -221,7 +363,57 @@ export const WordExportModal: React.FC<WordExportModalProps> = ({
             </div>
           </div>
 
-          {/* SECTION 2: MODE LEMBAR JAWABAN & PEMBAHASAN */}
+          {/* SECTION 3: PENGATURAN TABEL DETAIL HASIL EKSPOR (NEW FEATURE) */}
+          <div className="bg-slate-50 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-700/80 rounded-xl p-4 space-y-3">
+            <div className="flex items-center space-x-2">
+              <TableIcon className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+              <label className="text-xs font-bold uppercase tracking-wider text-slate-800 dark:text-slate-200">
+                Tabel Rincian & Spesifikasi Dokumen Word
+              </label>
+            </div>
+            <p className="text-xs text-slate-500 dark:text-slate-400">
+              Dokumen hasil ekspor akan memuat 6 atribut kurikulum lengkap dalam bentuk tabel:
+              <strong className="text-slate-700 dark:text-slate-300"> 1. Nomor Soal, 2. Elemen/Materi, 3. Sub-elemen, 4. Kompetensi, 5. Level Kognitif, 6. Bentuk Soal</strong>.
+            </p>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+              <label className="flex items-start space-x-3 p-3 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 cursor-pointer hover:border-blue-300 transition">
+                <input
+                  type="checkbox"
+                  checked={includeItemDetailTable}
+                  onChange={(e) => setIncludeItemDetailTable(e.target.checked)}
+                  className="mt-0.5 rounded-sm text-blue-600 focus:ring-blue-500 cursor-pointer"
+                />
+                <div>
+                  <span className="text-xs font-bold text-slate-800 dark:text-slate-200 block">
+                    Tabel Detail Pada Setiap Butir Soal
+                  </span>
+                  <span className="text-[11px] text-slate-500 dark:text-slate-400">
+                    Menyertakan tabel identitas 6-kolom terstruktur tepat di atas setiap nomor soal.
+                  </span>
+                </div>
+              </label>
+
+              <label className="flex items-start space-x-3 p-3 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 cursor-pointer hover:border-blue-300 transition">
+                <input
+                  type="checkbox"
+                  checked={includeMatrixTable}
+                  onChange={(e) => setIncludeMatrixTable(e.target.checked)}
+                  className="mt-0.5 rounded-sm text-blue-600 focus:ring-blue-500 cursor-pointer"
+                />
+                <div>
+                  <span className="text-xs font-bold text-slate-800 dark:text-slate-200 block">
+                    Tabel Matriks Kisi-Kisi Soal (Overview)
+                  </span>
+                  <span className="text-[11px] text-slate-500 dark:text-slate-400">
+                    Menyertakan tabel rekapitulasi kisi-kisi dan pemetaan kurikulum di awal naskah soal.
+                  </span>
+                </div>
+              </label>
+            </div>
+          </div>
+
+          {/* SECTION 4: MODE LEMBAR JAWABAN & PEMBAHASAN */}
           <div className="space-y-2">
             <label className="text-xs font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300 flex items-center space-x-1.5">
               <Layers className="w-3.5 h-3.5 text-slate-500" />
@@ -284,7 +476,7 @@ export const WordExportModal: React.FC<WordExportModalProps> = ({
             </div>
           </div>
 
-          {/* SECTION 3: KOP SURAT & ATRIBUT DOKUMEN */}
+          {/* SECTION 5: KOP SURAT & ATRIBUT DOKUMEN */}
           <div className="space-y-3 pt-2">
             <label className="text-xs font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300 flex items-center space-x-1.5">
               <School className="w-3.5 h-3.5 text-slate-500" />
@@ -333,6 +525,19 @@ export const WordExportModal: React.FC<WordExportModalProps> = ({
 
               <div>
                 <label className="block text-[11px] font-medium text-slate-600 dark:text-slate-400 mb-1">
+                  Tingkat / Kelas Target:
+                </label>
+                <input
+                  type="text"
+                  value={targetClass}
+                  onChange={(e) => setTargetClass(e.target.value)}
+                  placeholder="Contoh: Kelas 7 SMP / Semua Kelas"
+                  className="w-full px-3 py-1.5 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg text-xs text-slate-800 dark:text-slate-200"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-medium text-slate-600 dark:text-slate-400 mb-1">
                   Alokasi Waktu (Menit):
                 </label>
                 <input
@@ -344,18 +549,18 @@ export const WordExportModal: React.FC<WordExportModalProps> = ({
                   className="w-full px-3 py-1.5 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg text-xs text-slate-800 dark:text-slate-200"
                 />
               </div>
-            </div>
 
-            <div>
-              <label className="block text-[11px] font-medium text-slate-600 dark:text-slate-400 mb-1">
-                Petunjuk Pengerjaan:
-              </label>
-              <textarea
-                rows={2}
-                value={generalInstructions}
-                onChange={(e) => setGeneralInstructions(e.target.value)}
-                className="w-full px-3 py-1.5 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg text-xs text-slate-800 dark:text-slate-200"
-              />
+              <div>
+                <label className="block text-[11px] font-medium text-slate-600 dark:text-slate-400 mb-1">
+                  Petunjuk Ringkas:
+                </label>
+                <input
+                  type="text"
+                  value={generalInstructions}
+                  onChange={(e) => setGeneralInstructions(e.target.value)}
+                  className="w-full px-3 py-1.5 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg text-xs text-slate-800 dark:text-slate-200"
+                />
+              </div>
             </div>
           </div>
         </div>
@@ -364,6 +569,7 @@ export const WordExportModal: React.FC<WordExportModalProps> = ({
         <div className="flex items-center justify-between px-6 py-4 border-t border-slate-100 dark:border-slate-800 bg-slate-50/80 dark:bg-slate-950/40">
           <div className="text-xs text-slate-500 dark:text-slate-400">
             Total Soal Siap Ekspor: <strong className="text-blue-600 dark:text-blue-400">{matchingQuestionsCount} Butir</strong>
+            {selectedPacket && <span className="ml-2 text-indigo-600 dark:text-indigo-400 font-semibold">(Paket: {selectedPacket.code})</span>}
           </div>
 
           <div className="flex items-center space-x-3">

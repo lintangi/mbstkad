@@ -163,14 +163,16 @@ const STORAGE_KEY_GAS_URL = 'tkad_gas_url_v3';
 const STORAGE_KEY_SPREADSHEET_ID = 'tkad_spreadsheet_id_v3';
 const STORAGE_KEY_AUTOSYNC = 'tkad_autosync_v3';
 
-export const DEFAULT_SPREADSHEET_ID = '1Dv9vpvA_FFLwHBWX03DByx2ZqJ4wSzj0gFd5bceLDk0';
-export const DEFAULT_GAS_URL = 'https://script.google.com/macros/s/AKfycbylrwIAEjAIaanInaZqv4vp_SnLLTe3bflxmBxN9gF4ocEY0GYTzWvrj6SWSbSCg9Vj/exec';
+export const DEFAULT_SPREADSHEET_ID = '1tEGcYctNnoyNTLjI1JZ_QWUuR6BU4DtnTvjLYM-Fn8M';
+export const DEFAULT_GAS_URL = 'https://script.google.com/macros/s/AKfycbznlogqDRzhnwbHx3c7_TxEV-YOYvSjYHZGQjCFQIpKq-WNp2t0ZkCCqT52ZLw29TAZ/exec';
 
 const PREV_DEFAULT_SPREADSHEET_IDS = [
+  '1Dv9vpvA_FFLwHBWX03DByx2ZqJ4wSzj0gFd5bceLDk0',
   '1YSDHUR9CYgLHPGtFVUxQeCgcH51GdR-P9fqehUUnMK4',
   '1LbXmt8Ve2TrnNRzcgpLWfcRaW1au2GHWG4LnCtupDT8',
 ];
 const PREV_DEFAULT_GAS_URLS = [
+  'https://script.google.com/macros/s/AKfycbylrwIAEjAIaanInaZqv4vp_SnLLTe3bflxmBxN9gF4ocEY0GYTzWvrj6SWSbSCg9Vj/exec',
   'https://script.google.com/macros/s/AKfycbx9JoUcWeUq7JxS6Ab1MY0Bu4lbrZdxC1RmSy9rYzVPqJQfqQDkwkZ9mEiXJNBLBRC2Jg/exec',
   'https://script.google.com/macros/s/AKfycbw36Wln_iwfSLtYvUD8YutEMFgW5KEjbfAaITXXhiDL_EZHpcO8NIDtePHRrFA3Ws4l/exec',
   'https://script.google.com/macros/s/AKfycbzLi3eycowg1aaWsMN6_vN6zQ9L51kUdIi1_hkqxN26IPOPn0dUqHF5kNDiVNUyKjFfjA/exec',

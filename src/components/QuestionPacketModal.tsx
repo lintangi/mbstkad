@@ -20,6 +20,7 @@ interface QuestionPacketModalProps {
   onClose: () => void;
   selectedQuestionIds: string[];
   onClearSelection?: () => void;
+  onExportWord?: (packetId: string) => void;
 }
 
 export const QuestionPacketModal: React.FC<QuestionPacketModalProps> = ({
@@ -27,6 +28,7 @@ export const QuestionPacketModal: React.FC<QuestionPacketModalProps> = ({
   onClose,
   selectedQuestionIds,
   onClearSelection,
+  onExportWord,
 }) => {
   const {
     questions,
@@ -454,6 +456,20 @@ export const QuestionPacketModal: React.FC<QuestionPacketModalProps> = ({
                     </div>
 
                     <div className="flex items-center space-x-1 shrink-0">
+                      {onExportWord && (
+                        <button
+                          onClick={() => {
+                            onClose();
+                            onExportWord(pkt.id);
+                          }}
+                          className="px-2.5 py-1.5 bg-blue-50 dark:bg-blue-950/60 hover:bg-blue-100 dark:hover:bg-blue-900/60 text-blue-700 dark:text-blue-300 rounded-lg text-xs font-semibold transition flex items-center space-x-1 cursor-pointer border border-blue-200 dark:border-blue-800"
+                          title="Ekspor Naskah Word untuk Paket Ini"
+                        >
+                          <FileText className="w-3.5 h-3.5" />
+                          <span>Ekspor Word</span>
+                        </button>
+                      )}
+
                       {currentUser.role === 'admin' && (
                         <button
                           onClick={() => {
