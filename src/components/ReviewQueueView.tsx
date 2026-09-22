@@ -48,7 +48,7 @@ export const ReviewQueueView: React.FC = () => {
             </span>
           </div>
           <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-            Daftar soal yang diajukan oleh Pembuat Soal untuk ditinjau kelayakan mutu dan kunci jawabannya.
+            Daftar soal yang diajukan oleh Penyusun untuk ditinjau kelayakan mutu dan kunci jawabannya.
           </p>
         </div>
       </div>
@@ -99,7 +99,7 @@ export const ReviewQueueView: React.FC = () => {
           </div>
           <h3 className="font-bold text-slate-800 dark:text-slate-100 text-base">Antrian Review Kosong!</h3>
           <p className="text-xs text-slate-500 dark:text-slate-400 max-w-sm mx-auto">
-            Semua soal yang diajukan telah selesai ditinjau. Pembuat soal dapat mengajukan butir soal baru kapan saja.
+            Semua soal yang diajukan telah selesai ditelaah. Penyusun dapat mengajukan butir soal baru kapan saja.
           </p>
         </div>
       ) : (

@@ -73,17 +73,9 @@ export const Navbar: React.FC = () => {
                 <FileText className="w-5 h-5" />
               </div>
               <div>
-                <div className="flex items-center space-x-2">
-                  <span className="font-bold text-slate-900 dark:text-white tracking-tight text-lg">
-                    TKAD Adiwerna
-                  </span>
-                  <span className="bg-blue-50 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800 text-[10px] font-semibold px-2 py-0.5 rounded-md">
-                    GAS Engine
-                  </span>
-                </div>
-                <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                  Bahasa Indonesia • Matematika • IPAS
-                </p>
+                <span className="font-bold text-slate-900 dark:text-white tracking-tight text-lg">
+                  TKAD Adiwerna
+                </span>
               </div>
             </div>
           </div>
@@ -216,7 +208,7 @@ export const Navbar: React.FC = () => {
                           : 'bg-purple-100 dark:bg-purple-950 text-purple-700 dark:text-purple-300'
                       }`}
                     >
-                      {currentUser.role}
+                      {currentUser.role === 'pembuat' ? 'Penyusun' : currentUser.role === 'reviewer' ? 'Penelaah' : 'Admin'}
                     </span>
                   </div>
                 </div>
@@ -237,7 +229,7 @@ export const Navbar: React.FC = () => {
                             : 'bg-purple-100 dark:bg-purple-950 text-purple-700 dark:text-purple-300'
                         }`}
                       >
-                        {currentUser.role}
+                        {currentUser.role === 'pembuat' ? 'Penyusun' : currentUser.role === 'reviewer' ? 'Penelaah' : 'Administrator'}
                       </span>
                     </div>
                     <p className="text-[11px] text-slate-500 dark:text-slate-400 truncate">{currentUser.email}</p>

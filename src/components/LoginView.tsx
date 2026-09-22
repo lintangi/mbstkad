@@ -106,7 +106,7 @@ export const LoginView: React.FC = () => {
                 </div>
                 <div>
                   <span className="font-semibold text-slate-900 dark:text-white">Role-Based Access Control (RBAC)</span>
-                  <p className="text-slate-500 dark:text-slate-400 text-[11px]">Hak akses terpisah untuk Pembuat Soal, Reviewer Mutu, dan Administrator.</p>
+                  <p className="text-slate-500 dark:text-slate-400 text-[11px]">Hak akses terpisah untuk Penyusun, Penelaah, dan Administrator.</p>
                 </div>
               </div>
 

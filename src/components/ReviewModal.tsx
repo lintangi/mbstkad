@@ -208,7 +208,7 @@ export const ReviewModal: React.FC = () => {
           {/* Review Comments Form */}
           <div className="p-5 rounded-2xl bg-white dark:bg-slate-850 border border-slate-200 dark:border-slate-800 space-y-4">
             <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
-              2. Catatan & Rekomendasi Reviewer
+              2. Catatan & Rekomendasi Penelaah
             </h4>
 
             <div>
@@ -217,7 +217,7 @@ export const ReviewModal: React.FC = () => {
               </label>
               <textarea
                 rows={3}
-                placeholder="Berikan umpan balik konstruktif bagi pembuat soal (misal perbaikan rumus, koreksi opsi distraktor, dll)..."
+                placeholder="Berikan umpan balik konstruktif bagi penyusun soal (misal perbaikan rumus, koreksi opsi distraktor, dll)..."
                 value={generalComment}
                 onChange={(e) => setGeneralComment(e.target.value)}
                 className="w-full text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-800 p-3 text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 leading-relaxed"

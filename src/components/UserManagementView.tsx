@@ -368,8 +368,8 @@ export const UserManagementView: React.FC = () => {
             className="text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-800 dark:text-slate-200 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-purple-500"
           >
             <option value="all">Semua Peran (Role)</option>
-            <option value="pembuat">Pembuat Soal</option>
-            <option value="reviewer">Reviewer Mutu</option>
+            <option value="pembuat">Penyusun</option>
+            <option value="reviewer">Penelaah</option>
             <option value="admin">Administrator</option>
           </select>
 
@@ -444,7 +444,7 @@ export const UserManagementView: React.FC = () => {
                               : 'bg-purple-50 dark:bg-purple-950/60 text-purple-700 dark:text-purple-300 border-purple-200 dark:border-purple-800'
                           }`}
                         >
-                          {user.role === 'pembuat' ? 'Pembuat Soal' : user.role === 'reviewer' ? 'Reviewer Mutu' : 'Administrator'}
+                          {user.role === 'pembuat' ? 'Penyusun' : user.role === 'reviewer' ? 'Penelaah' : 'Administrator'}
                         </span>
                       </td>
 
@@ -578,8 +578,8 @@ export const UserManagementView: React.FC = () => {
                     onChange={(e) => setFormRole(e.target.value as UserRole)}
                     className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white font-medium"
                   >
-                    <option value="pembuat">Pembuat Soal</option>
-                    <option value="reviewer">Reviewer Mutu</option>
+                    <option value="pembuat">Penyusun</option>
+                    <option value="reviewer">Penelaah</option>
                     <option value="admin">Administrator</option>
                   </select>
                 </div>
@@ -688,8 +688,8 @@ export const UserManagementView: React.FC = () => {
                     onChange={(e) => setFormRole(e.target.value as UserRole)}
                     className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white font-medium"
                   >
-                    <option value="pembuat">Pembuat Soal</option>
-                    <option value="reviewer">Reviewer Mutu</option>
+                    <option value="pembuat">Penyusun</option>
+                    <option value="reviewer">Penelaah</option>
                     <option value="admin">Administrator</option>
                   </select>
                 </div>

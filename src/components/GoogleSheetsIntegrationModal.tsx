@@ -885,7 +885,7 @@ function initDatabaseSheets(ss) {
             </div>
 
             <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
-              Daftar seluruh akun pengguna (Administrator, Reviewer, Pembuat Soal) untuk sinkronisasi RBAC.
+              Daftar seluruh akun pengguna (Administrator, Penelaah, Penyusun) untuk sinkronisasi RBAC.
             </p>
 
             <div className="space-y-1.5 text-xs">

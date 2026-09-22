@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { LatexRenderer } from '../utils/latexParser';
+import { RoleGuideCard } from './RoleGuideCard';
 
 export const DashboardView: React.FC = () => {
   const {
@@ -50,7 +51,9 @@ export const DashboardView: React.FC = () => {
           <div className="flex flex-wrap items-center gap-2">
             <div className="inline-flex items-center space-x-2 bg-blue-700/60 border border-blue-500/40 px-3 py-1 rounded-full text-xs font-medium text-blue-100">
               <span className="w-2 h-2 rounded-full bg-emerald-400" />
-              <span>Peran: {currentUser.role.toUpperCase()} ({currentUser.name})</span>
+              <span>
+                Peran: {currentUser.role === 'pembuat' ? 'PENYUSUN' : currentUser.role === 'reviewer' ? 'PENELAAH' : 'ADMINISTRATOR'} ({currentUser.name})
+              </span>
             </div>
             {currentUser.role === 'admin' && (
               <div
@@ -171,7 +174,7 @@ export const DashboardView: React.FC = () => {
           className="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xs hover:border-slate-400 transition cursor-pointer"
         >
           <div className="flex items-center justify-between text-slate-400 dark:text-slate-500 mb-2">
-            <span className="text-xs font-bold uppercase tracking-wider">Draf Pembuat</span>
+            <span className="text-xs font-bold uppercase tracking-wider">Draf Penyusun</span>
             <Layers className="w-4 h-4 text-slate-400" />
           </div>
           <div className="text-2xl font-black text-slate-700 dark:text-slate-300 tracking-tight">{draftCount}</div>
@@ -387,6 +390,9 @@ export const DashboardView: React.FC = () => {
           )}
         </div>
       </div>
+
+      {/* Role-Based Usage Guide Section */}
+      <RoleGuideCard />
     </div>
   );
 };

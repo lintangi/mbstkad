@@ -209,7 +209,7 @@ export const AdminSettingsView: React.FC = () => {
                         : 'bg-purple-50 dark:bg-purple-950/60 text-purple-700 dark:text-purple-300 border-purple-200 dark:border-purple-800'
                     }`}
                   >
-                    {u.role}
+                    {u.role === 'pembuat' ? 'Penyusun' : u.role === 'reviewer' ? 'Penelaah' : 'Admin'}
                   </span>
                 </div>
               ))}
@@ -231,9 +231,9 @@ export const AdminSettingsView: React.FC = () => {
                   className="w-4 h-4 mt-0.5 rounded text-blue-600 focus:ring-blue-500 border-slate-300 dark:border-slate-700"
                 />
                 <div>
-                  <span className="font-semibold text-slate-800 dark:text-slate-200 block">Kunci Soal Sebelum Review</span>
+                  <span className="font-semibold text-slate-800 dark:text-slate-200 block">Kunci Soal Sebelum Telaah</span>
                   <span className="text-slate-500 dark:text-slate-400">
-                    Soal yang berstatus Menunggu Review terkunci dari pengeditan langsung oleh pembuat sampai ada keputusan review.
+                    Soal yang berstatus Menunggu Review terkunci dari pengeditan langsung oleh penyusun sampai ada keputusan telaah.
                   </span>
                 </div>
               </label>
@@ -248,7 +248,7 @@ export const AdminSettingsView: React.FC = () => {
                 <div>
                   <span className="font-semibold text-slate-800 dark:text-slate-200 block">Izinkan Penarikan Draf (Recall)</span>
                   <span className="text-slate-500 dark:text-slate-400">
-                    Pembuat soal diperbolehkan menarik kembali soal dari antrian review sebelum reviewer mulai memeriksa.
+                    Penyusun soal diperbolehkan menarik kembali soal dari antrian telaah sebelum penelaah mulai memeriksa.
                   </span>
                 </div>
               </label>

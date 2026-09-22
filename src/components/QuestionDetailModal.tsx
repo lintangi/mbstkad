@@ -457,7 +457,7 @@ export const QuestionDetailModal: React.FC = () => {
                       <div className="flex items-center justify-between">
                         <div className="flex items-center space-x-2">
                           <span className="font-bold text-slate-800 dark:text-slate-200">{rev.reviewerName}</span>
-                          <span className="text-[10px] text-slate-400">• Reviewer Mutu</span>
+                          <span className="text-[10px] text-slate-400">• Penelaah Mutu</span>
                         </div>
                         <span
                           className={`px-2.5 py-0.5 rounded-full font-bold uppercase text-[10px] ${
@@ -550,7 +550,7 @@ export const QuestionDetailModal: React.FC = () => {
                 className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold shadow-sm transition flex items-center space-x-1.5 cursor-pointer"
               >
                 <CheckCircle2 className="w-3.5 h-3.5" />
-                <span>Mulai Review Soal Ini</span>
+                <span>Mulai Telaah Soal Ini</span>
               </button>
             )}
 

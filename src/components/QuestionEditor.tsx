@@ -63,7 +63,7 @@ export const QuestionEditor: React.FC = () => {
   const editPermission = editingQuestion
     ? canUserEditQuestion(currentUser, editingQuestion)
     : currentUser.role === 'reviewer'
-    ? { allowed: false, reason: 'Reviewer tidak memiliki izin menyusun atau mengubah naskah soal. Silakan gunakan menu Antrian Review untuk meninjau soal.' }
+    ? { allowed: false, reason: 'Penelaah tidak memiliki izin menyusun atau mengubah naskah soal. Silakan gunakan menu Antrian Review untuk menelaah soal.' }
     : { allowed: true };
 
   // Form states
@@ -388,9 +388,9 @@ export const QuestionEditor: React.FC = () => {
         <div className="mb-6 p-4 rounded-xl bg-blue-50 dark:bg-blue-950/50 border border-blue-200 dark:border-blue-800 text-blue-900 dark:text-blue-200 text-xs flex items-start space-x-3">
           <Info className="w-4 h-4 text-blue-600 dark:text-blue-400 mt-0.5 shrink-0" />
           <div>
-            <p className="font-semibold">Catatan dari Reviewer (Perlu Revisi):</p>
+            <p className="font-semibold">Catatan dari Penelaah (Perlu Revisi):</p>
             <p className="text-blue-800 dark:text-blue-300 mt-1 italic">
-              &ldquo;{editingQuestion.reviews[0]?.generalComment || 'Silakan sesuaikan naskah butir soal sesuai catatan review.'}&rdquo;
+              &ldquo;{editingQuestion.reviews[0]?.generalComment || 'Silakan sesuaikan naskah butir soal sesuai catatan telaah.'}&rdquo;
             </p>
           </div>
         </div>

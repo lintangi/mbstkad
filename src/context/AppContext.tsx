@@ -164,7 +164,7 @@ const STORAGE_KEY_SPREADSHEET_ID = 'tkad_spreadsheet_id_v3';
 const STORAGE_KEY_AUTOSYNC = 'tkad_autosync_v3';
 
 export const DEFAULT_SPREADSHEET_ID = '1tEGcYctNnoyNTLjI1JZ_QWUuR6BU4DtnTvjLYM-Fn8M';
-export const DEFAULT_GAS_URL = 'https://script.google.com/macros/s/AKfycbznlogqDRzhnwbHx3c7_TxEV-YOYvSjYHZGQjCFQIpKq-WNp2t0ZkCCqT52ZLw29TAZ/exec';
+export const DEFAULT_GAS_URL = 'https://script.google.com/macros/s/AKfycbxS5m7eFm4SQ9fe_gORtWzjp6XiTbMeJLxn1l6fWRHixFSaRkRcCnEeNizFyWzPsjjG/exec';
 
 const PREV_DEFAULT_SPREADSHEET_IDS = [
   '1Dv9vpvA_FFLwHBWX03DByx2ZqJ4wSzj0gFd5bceLDk0',
@@ -172,6 +172,7 @@ const PREV_DEFAULT_SPREADSHEET_IDS = [
   '1LbXmt8Ve2TrnNRzcgpLWfcRaW1au2GHWG4LnCtupDT8',
 ];
 const PREV_DEFAULT_GAS_URLS = [
+  'https://script.google.com/macros/s/AKfycbznlogqDRzhnwbHx3c7_TxEV-YOYvSjYHZGQjCFQIpKq-WNp2t0ZkCCqT52ZLw29TAZ/exec',
   'https://script.google.com/macros/s/AKfycbylrwIAEjAIaanInaZqv4vp_SnLLTe3bflxmBxN9gF4ocEY0GYTzWvrj6SWSbSCg9Vj/exec',
   'https://script.google.com/macros/s/AKfycbx9JoUcWeUq7JxS6Ab1MY0Bu4lbrZdxC1RmSy9rYzVPqJQfqQDkwkZ9mEiXJNBLBRC2Jg/exec',
   'https://script.google.com/macros/s/AKfycbw36Wln_iwfSLtYvUD8YutEMFgW5KEjbfAaITXXhiDL_EZHpcO8NIDtePHRrFA3Ws4l/exec',
@@ -298,12 +299,12 @@ try {
 }
 
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  // Theme State
+  // Theme State (Default: light mode)
   const [theme, setTheme] = useState<'light' | 'dark'>(() => {
     try {
       const saved = localStorage.getItem(STORAGE_KEY_THEME);
       if (saved === 'dark' || saved === 'light') return saved;
-      return window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+      return 'light';
     } catch {
       return 'light';
     }
@@ -754,10 +755,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (user.role === 'reviewer') {
       return {
         allowed: false,
-        reason: 'Reviewer bertugas meninjau dan memberi catatan mutu naskah, bukan mengedit langsung.',
+        reason: 'Penelaah bertugas meninjau dan memberi catatan mutu naskah, bukan mengedit langsung.',
       };
     }
-    // Pembuat Soal
+    // Penyusun Soal
     const isOwner = question.createdById === user.id || question.createdByName === user.name;
     if (!isOwner) {
       return {
@@ -1604,7 +1605,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     addAuditLog(
       actionLog,
-      `Reviewer ${currentUser.name} mengambil keputusan [${decision.toUpperCase()}] untuk soal ${target.code}: "${generalComment.slice(0, 50)}..."`,
+      `Penelaah ${currentUser.name} mengambil keputusan [${decision.toUpperCase()}] untuk soal ${target.code}: "${generalComment.slice(0, 50)}..."`,
       target.id,
       target.code,
       {
@@ -1617,7 +1618,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     addNotification(
       target.createdById,
       notifTitle,
-      `Reviewer ${currentUser.name} telah menilai soal ${target.code}. Keputusan: ${decision.toUpperCase()}. Catatan: ${generalComment}`,
+      `Penelaah ${currentUser.name} telah menilai soal ${target.code}. Keputusan: ${decision.toUpperCase()}. Catatan: ${generalComment}`,
       notifType,
       target.id
     );
