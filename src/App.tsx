@@ -66,19 +66,12 @@ const MainContent: React.FC = () => {
 
       {/* Footer */}
       <footer
-        className={`border-t border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 py-4 mt-auto transition-all duration-300 ${
+        className={`border-t border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 py-4 mt-auto transition-all duration-300 text-center ${
           isSidebarMinimized ? 'sm:pl-16 lg:pl-0' : 'sm:pl-60 lg:pl-0'
         }`}
       >
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row items-center justify-between gap-2 text-xs text-slate-500 dark:text-slate-400">
-          <p>© 2026 Bank Soal TKA Adiwerna • Berbasis Web & Google Apps Script Engine</p>
-          <div className="flex items-center space-x-4">
-            <span className="flex items-center space-x-1.5" title={`Spreadsheet ID: ${spreadsheetId}`}>
-              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-              <span>Spreadsheet ({spreadsheetId ? spreadsheetId.slice(0, 10) + '...' : 'Default'}) • Auto-Sync</span>
-            </span>
-            <span>Versi 2.4-GAS</span>
-          </div>
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex items-center justify-center text-xs text-slate-500 dark:text-slate-400">
+          <p>© 2026 Bank Soal TKA Adiwerna</p>
         </div>
       </footer>
     </div>

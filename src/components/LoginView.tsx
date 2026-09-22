@@ -209,13 +209,8 @@ export const LoginView: React.FC = () => {
 
       {/* Simple Clean Footer */}
       <footer className="py-4 border-t border-slate-200 dark:border-slate-800 text-center text-xs text-slate-500 dark:text-slate-400">
-        <div className="max-w-7xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-2">
-          <p>© 2026 Bank Soal TKA Adiwerna • Berbasis Web & Google Apps Script Engine</p>
-          <div className="flex items-center space-x-3 text-[11px]">
-            <span>Mata Uji: Bahasa Indonesia, Matematika, IPAS</span>
-            <span>•</span>
-            <span className="text-emerald-600 dark:text-emerald-400 font-medium">RBAC Security Active</span>
-          </div>
+        <div className="max-w-7xl mx-auto px-4 flex items-center justify-center">
+          <p>© 2026 Bank Soal TKA Adiwerna</p>
         </div>
       </footer>
     </div>
