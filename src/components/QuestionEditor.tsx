@@ -618,16 +618,18 @@ export const QuestionEditor: React.FC = () => {
           <div className="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xs space-y-3">
             <div className="flex items-center justify-between">
               <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500">Lampiran Gambar / Media</h3>
-              <a
-                href="https://drive.google.com/drive/folders/1Adx3ZBQrcOx_X2iWWzag05xsywaHyOoC?usp=sharing"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-[10px] text-slate-400 hover:text-blue-500 transition flex items-center space-x-1"
-                title="Buka Folder Google Drive Tujuan"
-              >
-                <span>Buka Drive</span>
-                <ImageIcon className="w-3 h-3" />
-              </a>
+              {currentUser.role !== 'pembuat' && (
+                <a
+                  href="https://drive.google.com/drive/folders/1Adx3ZBQrcOx_X2iWWzag05xsywaHyOoC?usp=sharing"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-[10px] text-slate-400 hover:text-blue-500 transition flex items-center space-x-1"
+                  title="Buka Folder Google Drive Tujuan"
+                >
+                  <span>Buka Drive</span>
+                  <ImageIcon className="w-3 h-3" />
+                </a>
+              )}
             </div>
 
             {editPermission.allowed && (
