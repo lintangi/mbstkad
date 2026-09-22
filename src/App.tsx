@@ -71,7 +71,7 @@ const MainContent: React.FC = () => {
         }`}
       >
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row items-center justify-between gap-2 text-xs text-slate-500 dark:text-slate-400">
-          <p>© 2026 Sistem Manajemen Bank Soal TKAD Adiwerna • Berbasis Web & Google Apps Script Engine</p>
+          <p>© 2026 Bank Soal TKA Adiwerna • Berbasis Web & Google Apps Script Engine</p>
           <div className="flex items-center space-x-4">
             <span className="flex items-center space-x-1.5" title={`Spreadsheet ID: ${spreadsheetId}`}>
               <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />

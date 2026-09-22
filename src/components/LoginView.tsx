@@ -47,7 +47,7 @@ export const LoginView: React.FC = () => {
             </div>
             <div>
               <span className="font-bold text-slate-900 dark:text-white tracking-tight text-base">
-                TKAD Adiwerna
+                TKA Adiwerna
               </span>
               <span className="ml-2 bg-blue-100 dark:bg-blue-900/60 text-blue-800 dark:text-blue-300 text-[10px] font-semibold px-2 py-0.5 rounded-full border border-blue-200 dark:border-blue-700/50">
                 v2.4
@@ -81,7 +81,7 @@ export const LoginView: React.FC = () => {
 
             <div className="space-y-3">
               <h1 className="text-3xl sm:text-4xl font-extrabold tracking-tight text-slate-900 dark:text-white leading-tight">
-                Sistem Manajemen Bank Soal TKAD Adiwerna
+                Bank Soal TKA Adiwerna
               </h1>
               <p className="text-sm text-slate-600 dark:text-slate-300 leading-relaxed">
                 Repositori soal akademik terpusat untuk mata uji <strong>Bahasa Indonesia</strong>, <strong>Matematika</strong>, dan <strong>IPAS</strong> dengan penjaminan mutu berjenjang dan Google Spreadsheet DB.
@@ -210,7 +210,7 @@ export const LoginView: React.FC = () => {
       {/* Simple Clean Footer */}
       <footer className="py-4 border-t border-slate-200 dark:border-slate-800 text-center text-xs text-slate-500 dark:text-slate-400">
         <div className="max-w-7xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-2">
-          <p>© 2026 Sistem Manajemen Bank Soal TKAD Adiwerna • Berbasis Web & Google Apps Script Engine</p>
+          <p>© 2026 Bank Soal TKA Adiwerna • Berbasis Web & Google Apps Script Engine</p>
           <div className="flex items-center space-x-3 text-[11px]">
             <span>Mata Uji: Bahasa Indonesia, Matematika, IPAS</span>
             <span>•</span>

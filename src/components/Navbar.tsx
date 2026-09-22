@@ -74,7 +74,7 @@ export const Navbar: React.FC = () => {
               </div>
               <div>
                 <span className="font-bold text-slate-900 dark:text-white tracking-tight text-lg">
-                  TKAD Adiwerna
+                  TKA Adiwerna
                 </span>
               </div>
             </div>
@@ -189,7 +189,7 @@ export const Navbar: React.FC = () => {
             <div className="relative">
               <button
                 onClick={() => setShowUserMenu(!showUserMenu)}
-                className="flex items-center space-x-2.5 px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-850 hover:bg-slate-50 dark:hover:bg-slate-800 transition cursor-pointer"
+                className="flex items-center space-x-2.5 px-3 py-1.5 rounded-xl border border-slate-200 dark:border-black bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-900 transition cursor-pointer"
               >
                 <div className="w-7 h-7 rounded-lg bg-slate-800 dark:bg-blue-600 text-white flex items-center justify-center text-xs font-bold shadow-2xs">
                   {currentUser.avatar || currentUser.name.slice(0, 2).toUpperCase()}

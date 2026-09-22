@@ -28,7 +28,7 @@ import {
   deleteDoc,
   onSnapshot,
 } from 'firebase/firestore';
-import { db, testFirestoreConnection, handleFirestoreError, OperationType } from '../lib/firebase';
+import { db, testFirestoreConnection, handleFirestoreError, OperationType, sanitizeForFirestore } from '../lib/firebase';
 import { ParsedUserRow } from '../utils/excelUserUtils';
 
 interface AppContextType {
@@ -793,7 +793,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   // Helpers to persist data to Firestore
   const syncQuestionToFirestore = async (q: Question) => {
     try {
-      await setDoc(doc(db, 'questions', q.id), q);
+      await setDoc(doc(db, 'questions', q.id), sanitizeForFirestore(q));
     } catch (err) {
       console.warn('Firestore sync question error:', err);
     }
@@ -809,7 +809,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const syncLogToFirestore = async (log: AuditLog) => {
     try {
-      await setDoc(doc(db, 'audit_logs', log.id), log);
+      await setDoc(doc(db, 'audit_logs', log.id), sanitizeForFirestore(log));
     } catch (err) {
       console.warn('Firestore sync log error:', err);
     }
@@ -817,7 +817,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const syncNotifToFirestore = async (notif: AppNotification) => {
     try {
-      await setDoc(doc(db, 'notifications', notif.id), notif);
+      await setDoc(doc(db, 'notifications', notif.id), sanitizeForFirestore(notif));
     } catch (err) {
       console.warn('Firestore sync notif error:', err);
     }
@@ -825,7 +825,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const syncUserToFirestore = async (u: User) => {
     try {
-      await setDoc(doc(db, 'users', u.id), u);
+      await setDoc(doc(db, 'users', u.id), sanitizeForFirestore(u));
     } catch (err) {
       console.warn('Firestore sync user error:', err);
     }
@@ -841,7 +841,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const syncCategoryToFirestore = async (cat: CategoryMetadata) => {
     try {
-      await setDoc(doc(db, 'categories', cat.id), cat);
+      await setDoc(doc(db, 'categories', cat.id), sanitizeForFirestore(cat));
     } catch (err) {
       console.warn('Firestore sync category error:', err);
     }
@@ -869,10 +869,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       userName: currentUser.name,
       userRole: currentUser.role,
       action,
-      questionId,
-      questionCode,
+      ...(questionId ? { questionId } : {}),
+      ...(questionCode ? { questionCode } : {}),
       description,
-      details,
+      ...(details ? { details } : {}),
     };
     setAuditLogs((prev) => [newLog, ...prev]);
     syncLogToFirestore(newLog);
@@ -893,7 +893,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       message,
       type,
       read: false,
-      questionId,
+      ...(questionId ? { questionId } : {}),
     };
     setNotifications((prev) => [newNotif, ...prev]);
     syncNotifToFirestore(newNotif);
@@ -1382,7 +1382,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   // Question Packet CRUD Actions
   const syncPacketToFirestore = async (packet: QuestionPacket) => {
     try {
-      await setDoc(doc(db, 'question_packets', packet.id), packet);
+      await setDoc(doc(db, 'question_packets', packet.id), sanitizeForFirestore(packet));
     } catch (err) {
       console.warn('Firestore sync packet error:', err);
     }
@@ -1937,7 +1937,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       // 1. Sync all Questions to Firestore
       for (const q of questions) {
         try {
-          await setDoc(doc(db, 'questions', q.id), q);
+          await setDoc(doc(db, 'questions', q.id), sanitizeForFirestore(q));
           firestoreCount++;
         } catch (e) {
           console.warn('Sync question to firestore error:', e);
@@ -1947,7 +1947,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       // 2. Sync all Users to Firestore
       for (const u of users) {
         try {
-          await setDoc(doc(db, 'users', u.id), u);
+          await setDoc(doc(db, 'users', u.id), sanitizeForFirestore(u));
         } catch (e) {
           console.warn('Sync user to firestore error:', e);
         }
@@ -1956,7 +1956,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       // 3. Sync all Categories to Firestore
       for (const cat of categories) {
         try {
-          await setDoc(doc(db, 'categories', cat.id), cat);
+          await setDoc(doc(db, 'categories', cat.id), sanitizeForFirestore(cat));
         } catch (e) {
           console.warn('Sync category to firestore error:', e);
         }
@@ -1965,7 +1965,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       // 4. Sync all Packets to Firestore
       for (const pkt of packets) {
         try {
-          await setDoc(doc(db, 'question_packets', pkt.id), pkt);
+          await setDoc(doc(db, 'question_packets', pkt.id), sanitizeForFirestore(pkt));
         } catch (e) {
           console.warn('Sync packet to firestore error:', e);
         }
@@ -1974,7 +1974,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       // 5. Sync latest Audit Logs to Firestore
       for (const log of auditLogs.slice(0, 30)) {
         try {
-          await setDoc(doc(db, 'audit_logs', log.id), log);
+          await setDoc(doc(db, 'audit_logs', log.id), sanitizeForFirestore(log));
         } catch (e) {
           console.warn('Sync audit log to firestore error:', e);
         }

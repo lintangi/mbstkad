@@ -1,6 +1,6 @@
 {
   "name": "Sistem Manajemen Bank Soal TKAD-Adiwerna",
-  "description": "Platform manajemen bank soal TKAD-Adiwerna modern untuk penyusunan, peninjauan (review), versioning, dan audit trail terintegrasi Google Spreadsheet DB.",
+  "description": "Platform manajemen bank soal TKA Adiwerna modern untuk penyusunan, penelaahan (review), versioning, dan audit trail terintegrasi Google Spreadsheet DB.",
   "requestFramePermissions": [],
   "majorCapabilities": [
     "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
