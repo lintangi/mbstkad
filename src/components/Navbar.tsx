@@ -19,8 +19,6 @@ import {
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { AppTab } from '../types';
-// @ts-ignore
-import tutWuriLogo from '../assets/images/tut_wuri_handayani_1790073665362.jpg';
 
 export const Navbar: React.FC = () => {
   const {
@@ -72,7 +70,7 @@ export const Navbar: React.FC = () => {
               onClick={() => setActiveTab('dashboard')}
             >
               <div className="h-10 w-10 rounded-xl overflow-hidden shadow-sm flex items-center justify-center bg-white shrink-0">
-                <img src={tutWuriLogo} alt="TKA Adiwerna Logo" className="w-9 h-9 object-contain" referrerPolicy="no-referrer" />
+                <img src="https://tka.kemendikdasmen.go.id/assets/img/logo.png" alt="TKA Adiwerna Logo" className="w-9 h-9 object-contain" referrerPolicy="no-referrer" />
               </div>
               <div>
                 <span className="font-bold text-slate-900 dark:text-white tracking-tight text-lg">

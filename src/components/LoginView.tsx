@@ -12,8 +12,6 @@ import {
   Moon,
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
-// @ts-ignore
-import tutWuriLogo from '../assets/images/tut_wuri_handayani_1790073665362.jpg';
 
 export const LoginView: React.FC = () => {
   const { login, theme, toggleTheme } = useApp();
@@ -45,7 +43,7 @@ export const LoginView: React.FC = () => {
         <div className="max-w-7xl mx-auto flex items-center justify-between">
           <div className="flex items-center space-x-3">
             <div className="h-9 w-9 rounded-xl overflow-hidden shadow-sm flex items-center justify-center bg-white shrink-0">
-              <img src={tutWuriLogo} alt="TKA Adiwerna Logo" className="w-8 h-8 object-contain" referrerPolicy="no-referrer" />
+              <img src="https://tka.kemendikdasmen.go.id/assets/img/logo.png" alt="TKA Adiwerna Logo" className="w-8 h-8 object-contain" referrerPolicy="no-referrer" />
             </div>
             <div>
               <span className="font-bold text-slate-900 dark:text-white tracking-tight text-base">
