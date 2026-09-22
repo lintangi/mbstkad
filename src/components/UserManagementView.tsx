@@ -59,6 +59,7 @@ export const UserManagementView: React.FC = () => {
   const [formName, setFormName] = useState('');
   const [formEmail, setFormEmail] = useState('');
   const [formRole, setFormRole] = useState<UserRole>('pembuat');
+  const [formRoles, setFormRoles] = useState<UserRole[]>(['pembuat']);
   const [formDepartment, setFormDepartment] = useState('');
   const [formPassword, setFormPassword] = useState('password123');
   const [formStatus, setFormStatus] = useState<'aktif' | 'nonaktif'>('aktif');
@@ -75,6 +76,7 @@ export const UserManagementView: React.FC = () => {
     setFormName('');
     setFormEmail('');
     setFormRole('pembuat');
+    setFormRoles(['pembuat']);
     setFormDepartment('Bahasa Indonesia');
     setFormPassword('password123');
     setFormStatus('aktif');
@@ -86,6 +88,7 @@ export const UserManagementView: React.FC = () => {
     setFormName(user.name);
     setFormEmail(user.email);
     setFormRole(user.role);
+    setFormRoles(user.roles && user.roles.length > 0 ? user.roles : [user.role]);
     setFormDepartment(user.department || '');
     setFormPassword(user.password || 'password123');
     setFormStatus(user.status || 'aktif');
@@ -94,6 +97,11 @@ export const UserManagementView: React.FC = () => {
   const handleCreateUser = (e: React.FormEvent) => {
     e.preventDefault();
     if (!formName.trim() || !formEmail.trim()) return;
+
+    if (formRoles.length === 0) {
+      setFeedbackMsg({ type: 'error', text: 'Pilih setidaknya satu peran (role) untuk pengguna.' });
+      return;
+    }
 
     // Check email uniqueness
     if (users.some((u) => u.email.toLowerCase() === formEmail.trim().toLowerCase())) {
@@ -104,7 +112,8 @@ export const UserManagementView: React.FC = () => {
     addUser({
       name: formName.trim(),
       email: formEmail.trim().toLowerCase(),
-      role: formRole,
+      role: formRoles[0] || 'pembuat',
+      roles: formRoles,
       department: formDepartment.trim() || 'Unit Akademik TKAD Adiwerna',
       password: formPassword.trim() || 'password123',
       status: formStatus,
@@ -119,10 +128,16 @@ export const UserManagementView: React.FC = () => {
     e.preventDefault();
     if (!editingUser || !formName.trim() || !formEmail.trim()) return;
 
+    if (formRoles.length === 0) {
+      setFeedbackMsg({ type: 'error', text: 'Pilih setidaknya satu peran (role) untuk pengguna.' });
+      return;
+    }
+
     updateUser(editingUser.id, {
       name: formName.trim(),
       email: formEmail.trim().toLowerCase(),
-      role: formRole,
+      role: formRoles.includes(editingUser.role) ? editingUser.role : (formRoles[0] || 'pembuat'),
+      roles: formRoles,
       department: formDepartment.trim() || 'Unit Akademik TKAD Adiwerna',
       password: formPassword.trim() || 'password123',
       status: formStatus,
@@ -229,7 +244,10 @@ export const UserManagementView: React.FC = () => {
 
   // Filtered users
   const filteredUsers = users.filter((u) => {
-    if (roleFilter !== 'all' && u.role !== roleFilter) return false;
+    if (roleFilter !== 'all') {
+      const uRoles = u.roles && u.roles.length > 0 ? u.roles : [u.role];
+      if (!uRoles.includes(roleFilter)) return false;
+    }
     if (statusFilter !== 'all' && (u.status || 'aktif') !== statusFilter) return false;
     if (searchTerm.trim()) {
       const q = searchTerm.toLowerCase();
@@ -435,17 +453,22 @@ export const UserManagementView: React.FC = () => {
 
                       {/* Role Badge */}
                       <td className="py-3.5 px-4">
-                        <span
-                          className={`inline-flex items-center px-2.5 py-1 rounded-full text-[11px] font-semibold capitalize border ${
-                            user.role === 'pembuat'
-                              ? 'bg-blue-50 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-800'
-                              : user.role === 'reviewer'
-                              ? 'bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800'
-                              : 'bg-purple-50 dark:bg-purple-950/60 text-purple-700 dark:text-purple-300 border-purple-200 dark:border-purple-800'
-                          }`}
-                        >
-                          {user.role === 'pembuat' ? 'Penyusun' : user.role === 'reviewer' ? 'Penelaah' : 'Administrator'}
-                        </span>
+                        <div className="flex flex-wrap gap-1.5 max-w-[180px]">
+                          {(user.roles && user.roles.length > 0 ? user.roles : [user.role]).map((r) => (
+                            <span
+                              key={r}
+                              className={`inline-flex items-center px-2 py-0.5 rounded-lg text-[10px] font-bold capitalize border ${
+                                r === 'pembuat'
+                                  ? 'bg-blue-50 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300 border-blue-100 dark:border-blue-900/40'
+                                  : r === 'reviewer'
+                                  ? 'bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border-emerald-100 dark:border-emerald-900/40'
+                                  : 'bg-purple-50 dark:bg-purple-950/60 text-purple-700 dark:text-purple-300 border-purple-100 dark:border-purple-900/40'
+                              }`}
+                            >
+                              {r === 'pembuat' ? 'Penyusun' : r === 'reviewer' ? 'Penelaah' : 'Admin'}
+                            </span>
+                          ))}
+                        </div>
                       </td>
 
                       {/* Department */}
@@ -570,31 +593,46 @@ export const UserManagementView: React.FC = () => {
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">Peran (Role) *</label>
-                  <select
-                    value={formRole}
-                    onChange={(e) => setFormRole(e.target.value as UserRole)}
-                    className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white font-medium"
-                  >
-                    <option value="pembuat">Penyusun</option>
-                    <option value="reviewer">Penelaah</option>
-                    <option value="admin">Administrator</option>
-                  </select>
+              <div>
+                <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">Peran (Multi-Role) *</label>
+                <div className="grid grid-cols-3 gap-2 p-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl">
+                  {[
+                    { id: 'pembuat', label: 'Penyusun' },
+                    { id: 'reviewer', label: 'Penelaah' },
+                    { id: 'admin', label: 'Administrator' }
+                  ].map((roleOption) => {
+                    const isChecked = formRoles.includes(roleOption.id as UserRole);
+                    return (
+                      <label key={roleOption.id} className="flex items-center space-x-2 text-xs font-medium text-slate-700 dark:text-slate-300 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={isChecked}
+                          onChange={(e) => {
+                            if (e.target.checked) {
+                              setFormRoles([...formRoles, roleOption.id as UserRole]);
+                            } else {
+                              setFormRoles(formRoles.filter(r => r !== roleOption.id));
+                            }
+                          }}
+                          className="rounded text-blue-600 focus:ring-blue-500 w-4 h-4 border-slate-300 dark:border-slate-600"
+                        />
+                        <span>{roleOption.label}</span>
+                      </label>
+                    );
+                  })}
                 </div>
+              </div>
 
-                <div>
-                  <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">Status Akun</label>
-                  <select
-                    value={formStatus}
-                    onChange={(e) => setFormStatus(e.target.value as any)}
-                    className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white"
-                  >
-                    <option value="aktif">Aktif</option>
-                    <option value="nonaktif">Nonaktif</option>
-                  </select>
-                </div>
+              <div>
+                <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">Status Akun</label>
+                <select
+                  value={formStatus}
+                  onChange={(e) => setFormStatus(e.target.value as any)}
+                  className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white"
+                >
+                  <option value="aktif">Aktif</option>
+                  <option value="nonaktif">Nonaktif</option>
+                </select>
               </div>
 
               <div>
@@ -680,31 +718,46 @@ export const UserManagementView: React.FC = () => {
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">Peran (Role) *</label>
-                  <select
-                    value={formRole}
-                    onChange={(e) => setFormRole(e.target.value as UserRole)}
-                    className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white font-medium"
-                  >
-                    <option value="pembuat">Penyusun</option>
-                    <option value="reviewer">Penelaah</option>
-                    <option value="admin">Administrator</option>
-                  </select>
+              <div>
+                <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">Peran (Multi-Role) *</label>
+                <div className="grid grid-cols-3 gap-2 p-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl">
+                  {[
+                    { id: 'pembuat', label: 'Penyusun' },
+                    { id: 'reviewer', label: 'Penelaah' },
+                    { id: 'admin', label: 'Administrator' }
+                  ].map((roleOption) => {
+                    const isChecked = formRoles.includes(roleOption.id as UserRole);
+                    return (
+                      <label key={roleOption.id} className="flex items-center space-x-2 text-xs font-medium text-slate-700 dark:text-slate-300 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={isChecked}
+                          onChange={(e) => {
+                            if (e.target.checked) {
+                              setFormRoles([...formRoles, roleOption.id as UserRole]);
+                            } else {
+                              setFormRoles(formRoles.filter(r => r !== roleOption.id));
+                            }
+                          }}
+                          className="rounded text-blue-600 focus:ring-blue-500 w-4 h-4 border-slate-300 dark:border-slate-600"
+                        />
+                        <span>{roleOption.label}</span>
+                      </label>
+                    );
+                  })}
                 </div>
+              </div>
 
-                <div>
-                  <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">Status Akun</label>
-                  <select
-                    value={formStatus}
-                    onChange={(e) => setFormStatus(e.target.value as any)}
-                    className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white"
-                  >
-                    <option value="aktif">Aktif</option>
-                    <option value="nonaktif">Nonaktif</option>
-                  </select>
-                </div>
+              <div>
+                <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">Status Akun</label>
+                <select
+                  value={formStatus}
+                  onChange={(e) => setFormStatus(e.target.value as any)}
+                  className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white"
+                >
+                  <option value="aktif">Aktif</option>
+                  <option value="nonaktif">Nonaktif</option>
+                </select>
               </div>
 
               <div>

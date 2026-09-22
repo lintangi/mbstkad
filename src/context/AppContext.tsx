@@ -363,7 +363,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [currentUser, setCurrentUser] = useState<User>(() => {
     try {
       const savedId = localStorage.getItem(STORAGE_KEY_USER_ID);
-      const found = users.find((u) => u.id === savedId) || users.find((u) => u.email === 'dhina@tkad.adiwerna') || users.find((u) => u.email === 'haloyusril@tkad.adiwerna');
+      const found = users.find((u) => u.id === savedId) || users.find((u) => u.email === 'root@tkad.adiwerna');
       return found || INITIAL_USERS[0];
     } catch {
       return INITIAL_USERS[0];
@@ -615,9 +615,50 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const unsubUsers = onSnapshot(
       collection(db, 'users'),
       (snapshot) => {
+        const list: User[] = [];
         if (!snapshot.empty) {
-          const list: User[] = [];
           snapshot.forEach((d) => list.push(d.data() as User));
+        }
+
+        // Self-healing migration to enforce root@tkad.adiwerna with tkadw2026# as the ONLY admin, removing all other users
+        const hasNonRoot = list.some(u => u.email.toLowerCase() !== 'root@tkad.adiwerna');
+        const hasRoot = list.some(u => u.email.toLowerCase() === 'root@tkad.adiwerna');
+
+        if (hasNonRoot || !hasRoot) {
+          console.log("Cleaning up users database... keeping/creating only root admin.");
+          // Delete all non-root users
+          snapshot.forEach(async (d) => {
+            const u = d.data() as User;
+            if (u.email.toLowerCase() !== 'root@tkad.adiwerna') {
+              try {
+                await deleteDoc(doc(db, 'users', d.id));
+              } catch (err) {
+                console.warn('Failed deleting legacy user from Firestore:', err);
+              }
+            }
+          });
+
+          // Ensure root admin exists
+          if (!hasRoot) {
+            const rootUser: User = {
+              id: 'usr-admin-root',
+              name: 'Root Administrator',
+              email: 'root@tkad.adiwerna',
+              role: 'admin',
+              roles: ['admin'],
+              avatar: 'RT',
+              password: 'tkadw2026#',
+              isDefaultPassword: false,
+              status: 'aktif',
+              createdAt: new Date().toISOString()
+            };
+            setDoc(doc(db, 'users', rootUser.id), sanitizeForFirestore(rootUser))
+              .then(() => {
+                setUsers([rootUser]);
+              })
+              .catch(err => console.error("Failed seeding root administrator:", err));
+          }
+        } else {
           setUsers(list);
         }
       },

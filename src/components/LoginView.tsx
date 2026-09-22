@@ -84,7 +84,7 @@ export const LoginView: React.FC = () => {
                 Bank Soal TKA Adiwerna
               </h1>
               <p className="text-sm text-slate-600 dark:text-slate-300 leading-relaxed">
-                Repositori soal akademik terpusat untuk mata uji <strong>Bahasa Indonesia</strong>, <strong>Matematika</strong>, dan <strong>IPAS</strong> dengan penjaminan mutu berjenjang dan Google Spreadsheet DB.
+                Repositori soal akademik terpusat untuk mata uji <strong>Bahasa Indonesia</strong>, <strong>Matematika</strong>, dan <strong>IPAS</strong> dengan penjaminan mutu berjenjang.
               </p>
             </div>
 
@@ -201,6 +201,17 @@ export const LoginView: React.FC = () => {
                     </>
                   )}
                 </button>
+
+                <div className="text-center pt-2">
+                  <a
+                    href="https://wa.me/6285642209992"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-xs text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 font-medium transition duration-150 underline"
+                  >
+                    Lupa Akun / Kata Sandi
+                  </a>
+                </div>
               </form>
             </div>
           </div>

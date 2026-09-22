@@ -40,6 +40,7 @@ export const Navbar: React.FC = () => {
     toggleMobileSidebar,
     setShowChangePasswordModal,
     setIsPasswordChangeForced,
+    updateUser,
   } = useApp();
 
   const [showNotifs, setShowNotifs] = useState(false);
@@ -235,6 +236,34 @@ export const Navbar: React.FC = () => {
                     <p className="text-[11px] text-slate-500 dark:text-slate-400 truncate">{currentUser.email}</p>
                     <p className="text-[10px] text-slate-400 dark:text-slate-500">{currentUser.department}</p>
                   </div>
+
+                  {/* Multi-Role Switcher */}
+                  {currentUser.roles && currentUser.roles.length > 1 && (
+                    <div className="px-4 py-2.5 border-b border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/50">
+                      <p className="text-[9px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider mb-1.5">Beralih Peran Aktif</p>
+                      <div className="flex flex-col gap-1">
+                        {currentUser.roles.map((r) => (
+                          <button
+                            key={r}
+                            onClick={() => {
+                              updateUser(currentUser.id, { role: r });
+                              setShowUserMenu(false);
+                            }}
+                            className={`w-full text-left text-xs px-2.5 py-1.5 rounded-lg font-semibold flex items-center justify-between transition cursor-pointer ${
+                              currentUser.role === r
+                                ? 'bg-blue-50 dark:bg-blue-950/40 text-blue-600 dark:text-blue-400 border border-blue-200 dark:border-blue-900/30'
+                                : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 border border-transparent'
+                            }`}
+                          >
+                            <span>{r === 'pembuat' ? 'Penyusun' : r === 'reviewer' ? 'Penelaah' : 'Administrator'}</span>
+                            {currentUser.role === r && (
+                              <span className="w-1.5 h-1.5 rounded-full bg-blue-500" />
+                            )}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
 
                   {/* User Profile Actions */}
                   <div className="px-3 pt-2 space-y-1">
