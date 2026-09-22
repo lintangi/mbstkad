@@ -91,8 +91,13 @@ export interface Question {
   code: string; // e.g., "TKAD-VER-001"
   type: QuestionType;
   status: QuestionStatus;
-  subtest: string; // e.g., "Penalaran Verbal", "Penalaran Kuantitatif", "Penalaran Logis", "Penalaran Figural"
-  topic: string; // e.g., "Silogisme", "Aritmatika Sosial", "Deret Angka", "Analogi Kata"
+  subtest: string; // e.g., "Bahasa Indonesia", "Matematika", "IPAS"
+  topic: string; // Elemen / Topik bahasan
+  element?: string; // Elemen
+  subElement?: string; // Sub Elemen
+  competency?: string; // Indikator Soal / Kompetensi
+  cognitiveLevel?: string; // Level Kognitif / Taksonomi Bloom (C1 - C6)
+  packetIds?: string[]; // Daftar ID paket soal terkait
   difficulty: DifficultyLevel;
   tags: string[];
   defaultScore: number;
@@ -121,6 +126,24 @@ export interface Question {
   versions: QuestionVersion[];
 }
 
+export interface QuestionPacket {
+  id: string;
+  code: string; // e.g., "PKT-IPAS-01"
+  title: string; // e.g., "Paket Ujian Akhir Semester IPAS"
+  description?: string;
+  subtest: string;
+  questionIds: string[];
+  totalQuestions?: number;
+  totalScore?: number;
+  targetClass?: string;
+  academicYear?: string;
+  status: 'draft' | 'aktif' | 'arsip';
+  createdAt: string;
+  updatedAt: string;
+  createdById: string;
+  createdByName: string;
+}
+
 export type AppTab =
   | 'dashboard'
   | 'bank_soal'
@@ -142,16 +165,23 @@ export interface AuditLog {
     | 'LOGOUT'
     | 'CREATE_QUESTION'
     | 'UPDATE_QUESTION'
+    | 'BULK_DELETE_QUESTIONS'
     | 'SUBMIT_REVIEW'
     | 'APPROVE'
     | 'REJECT'
     | 'REQUEST_CHANGES'
     | 'RECALL'
     | 'DUPLICATE'
+    | 'CREATE_PACKET'
+    | 'UPDATE_PACKET'
+    | 'DELETE_PACKET'
     | 'CONFIG_CHANGE'
     | 'CREATE_USER'
     | 'UPDATE_USER'
-    | 'DELETE_USER';
+    | 'DELETE_USER'
+    | 'IMPORT_USERS'
+    | 'DUAL_SYNC'
+    | 'SYNC_GAS';
   questionId?: string;
   questionCode?: string;
   description: string;

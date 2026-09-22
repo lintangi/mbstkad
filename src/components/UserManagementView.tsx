@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import {
   Users,
   Edit2,
@@ -10,19 +10,36 @@ import {
   Key,
   X,
   RefreshCw,
-  Lock,
+  Plus,
+  Trash2,
+  FileSpreadsheet,
+  Download,
+  Upload,
   ShieldCheck,
   Info,
+  AlertTriangle,
+  Database,
+  Check,
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { User, UserRole } from '../types';
+import {
+  downloadUserExcelTemplate,
+  exportUsersToExcel,
+  parseUserExcelFile,
+  ParsedUserRow,
+} from '../utils/excelUserUtils';
 
 export const UserManagementView: React.FC = () => {
   const {
     users,
+    addUser,
     updateUser,
+    deleteUser,
+    importUsers,
     currentUser,
     syncWithGoogleSheets,
+    dualSyncDatabases,
     isSyncing,
     lastGasSyncTime,
   } = useApp();
@@ -31,17 +48,38 @@ export const UserManagementView: React.FC = () => {
   const [roleFilter, setRoleFilter] = useState<'all' | UserRole>('all');
   const [statusFilter, setStatusFilter] = useState<'all' | 'aktif' | 'nonaktif'>('all');
 
-  // Modal states
+  // Modals
   const [editingUser, setEditingUser] = useState<User | null>(null);
+  const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+  const [isImportModalOpen, setIsImportModalOpen] = useState(false);
   const [feedbackMsg, setFeedbackMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [isDualSyncing, setIsDualSyncing] = useState(false);
 
-  // Form states for Edit
+  // Form states for Single Add / Edit
   const [formName, setFormName] = useState('');
   const [formEmail, setFormEmail] = useState('');
   const [formRole, setFormRole] = useState<UserRole>('pembuat');
   const [formDepartment, setFormDepartment] = useState('');
   const [formPassword, setFormPassword] = useState('password123');
   const [formStatus, setFormStatus] = useState<'aktif' | 'nonaktif'>('aktif');
+
+  // Excel Import states
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [importFile, setImportFile] = useState<File | null>(null);
+  const [parsedRows, setParsedRows] = useState<ParsedUserRow[]>([]);
+  const [parseErrors, setParseErrors] = useState<string[]>([]);
+  const [isParsing, setIsParsing] = useState(false);
+  const [importMode, setImportMode] = useState<'append' | 'replace'>('append');
+
+  const openAddModal = () => {
+    setFormName('');
+    setFormEmail('');
+    setFormRole('pembuat');
+    setFormDepartment('Bahasa Indonesia');
+    setFormPassword('password123');
+    setFormStatus('aktif');
+    setIsAddModalOpen(true);
+  };
 
   const openEditModal = (user: User) => {
     setEditingUser(user);
@@ -51,6 +89,30 @@ export const UserManagementView: React.FC = () => {
     setFormDepartment(user.department || '');
     setFormPassword(user.password || 'password123');
     setFormStatus(user.status || 'aktif');
+  };
+
+  const handleCreateUser = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!formName.trim() || !formEmail.trim()) return;
+
+    // Check email uniqueness
+    if (users.some((u) => u.email.toLowerCase() === formEmail.trim().toLowerCase())) {
+      setFeedbackMsg({ type: 'error', text: `Email ${formEmail} sudah digunakan oleh pengguna lain.` });
+      return;
+    }
+
+    addUser({
+      name: formName.trim(),
+      email: formEmail.trim().toLowerCase(),
+      role: formRole,
+      department: formDepartment.trim() || 'Unit Akademik TKAD Adiwerna',
+      password: formPassword.trim() || 'password123',
+      status: formStatus,
+    });
+
+    setIsAddModalOpen(false);
+    setFeedbackMsg({ type: 'success', text: `Pengguna baru "${formName}" berhasil ditambahkan.` });
+    setTimeout(() => setFeedbackMsg(null), 4000);
   };
 
   const handleUpdateUser = (e: React.FormEvent) => {
@@ -69,6 +131,100 @@ export const UserManagementView: React.FC = () => {
     setEditingUser(null);
     setFeedbackMsg({ type: 'success', text: `Data profil ${formName} berhasil diperbarui.` });
     setTimeout(() => setFeedbackMsg(null), 4000);
+  };
+
+  const handleDeleteUser = (user: User) => {
+    if (user.id === currentUser.id) {
+      alert('Anda tidak dapat menghapus akun Anda sendiri yang sedang aktif digunakan.');
+      return;
+    }
+
+    if (window.confirm(`Apakah Anda yakin ingin menghapus pengguna "${user.name}" (${user.email})? Tindakan ini akan menghapus akun dari roster.`)) {
+      deleteUser(user.id);
+      setFeedbackMsg({ type: 'success', text: `Pengguna "${user.name}" berhasil dihapus.` });
+      setTimeout(() => setFeedbackMsg(null), 4000);
+    }
+  };
+
+  // Handle Excel File Selection
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setImportFile(file);
+    setIsParsing(true);
+    setParseErrors([]);
+    setParsedRows([]);
+
+    try {
+      const result = await parseUserExcelFile(file);
+      setParsedRows(result.validUsers);
+      setParseErrors(result.errors);
+    } catch (err: any) {
+      setParseErrors([err.message || 'Gagal memproses file Excel.']);
+    } finally {
+      setIsParsing(false);
+    }
+  };
+
+  const handleExecuteImport = () => {
+    if (parsedRows.length === 0) {
+      alert('Tidak ada baris data pengguna valid yang dapat diimpor.');
+      return;
+    }
+
+    const modeText = importMode === 'replace' ? 'menimpa seluruh daftar pengguna yang ada' : 'menambahkan ke daftar pengguna yang ada';
+    if (
+      window.confirm(
+        `Konfirmasi Impor:\nAnda akan mengimpor ${parsedRows.length} pengguna dengan mode ${modeText}. Lanjutkan?`
+      )
+    ) {
+      const newUsersPayload = parsedRows.map((row) => ({
+        name: row.name,
+        email: row.email,
+        role: row.role,
+        department: row.department,
+        password: row.password || 'password123',
+        status: row.status,
+      }));
+
+      importUsers(newUsersPayload, importMode);
+      setIsImportModalOpen(false);
+      setImportFile(null);
+      setParsedRows([]);
+      setParseErrors([]);
+      setFeedbackMsg({
+        type: 'success',
+        text: `Berhasil mengimpor ${parsedRows.length} akun pengguna (${importMode === 'replace' ? 'Mode Timpa' : 'Mode Tambah'}).`,
+      });
+      setTimeout(() => setFeedbackMsg(null), 4000);
+    }
+  };
+
+  const handleTriggerDualSync = async () => {
+    setIsDualSyncing(true);
+    try {
+      const result = await dualSyncDatabases();
+      if (result.success) {
+        setFeedbackMsg({
+          type: 'success',
+          text: `Sinkronisasi Database Ganda Berhasil: ${result.message}`,
+        });
+      } else {
+        setFeedbackMsg({
+          type: 'error',
+          text: `Sinkronisasi Database Ganda: ${result.message}`,
+        });
+      }
+    } catch (err: any) {
+      setFeedbackMsg({
+        type: 'error',
+        text: `Gagal sinkronisasi: ${err.message}`,
+      });
+    } finally {
+      setIsDualSyncing(false);
+      setTimeout(() => setFeedbackMsg(null), 5000);
+    }
   };
 
   // Filtered users
@@ -99,50 +255,73 @@ export const UserManagementView: React.FC = () => {
             </h1>
           </div>
           <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-            Daftar resmi tenaga pendidik dan administrator bank soal TKAD Adiwerna.
+            Kelola penambahan, penghapusan, impor/ekspor Excel, dan sinkronisasi basis data ganda (Firebase & Google Sheets).
           </p>
         </div>
 
-        <div className="flex items-center space-x-2">
+        <div className="flex flex-wrap items-center gap-2">
+          {/* Dual Sync Button */}
           <button
-            onClick={() => syncWithGoogleSheets()}
-            disabled={isSyncing}
-            className="px-3.5 py-2.5 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 text-xs font-semibold transition flex items-center space-x-1.5 cursor-pointer disabled:opacity-50"
-            title="Kirim pembaruan pengguna ke Google Spreadsheet"
+            onClick={handleTriggerDualSync}
+            disabled={isDualSyncing || isSyncing}
+            className="px-3.5 py-2.5 rounded-xl bg-blue-50 dark:bg-blue-950/60 hover:bg-blue-100 dark:hover:bg-blue-900/60 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800 text-xs font-semibold transition flex items-center space-x-1.5 cursor-pointer disabled:opacity-50 shadow-2xs"
+            title="Sinkronkan data pengguna dan seluruh sistem ke Firebase Firestore & Google Spreadsheet"
           >
-            <RefreshCw className={`w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 ${isSyncing ? 'animate-spin' : ''}`} />
-            <span>{isSyncing ? 'Menyinkronkan...' : 'Push Live ke Sheets'}</span>
-            {lastGasSyncTime && (
-              <span className="text-[10px] text-slate-400 dark:text-slate-500 font-mono hidden md:inline">
-                ({lastGasSyncTime})
-              </span>
-            )}
+            <Database className={`w-3.5 h-3.5 ${isDualSyncing ? 'animate-spin' : ''}`} />
+            <span>{isDualSyncing ? 'Sinkron Ganda...' : 'Sinkron Database Ganda'}</span>
           </button>
 
-          {/* Locked Badge */}
-          <div className="px-3 py-2 rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800/80 text-amber-800 dark:text-amber-300 text-xs font-semibold flex items-center space-x-1.5">
-            <Lock className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400 shrink-0" />
-            <span>Roster Terkunci</span>
-          </div>
+          {/* Export to Excel */}
+          <button
+            onClick={() => exportUsersToExcel(users)}
+            className="px-3.5 py-2.5 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 text-xs font-semibold transition flex items-center space-x-1.5 cursor-pointer shadow-2xs"
+            title="Ekspor daftar pengguna saat ini ke file Excel (.xlsx)"
+          >
+            <Download className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+            <span>Ekspor Excel</span>
+          </button>
+
+          {/* Import from Excel */}
+          <button
+            onClick={() => {
+              setImportFile(null);
+              setParsedRows([]);
+              setParseErrors([]);
+              setIsImportModalOpen(true);
+            }}
+            className="px-3.5 py-2.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/60 hover:bg-emerald-100 dark:hover:bg-emerald-900/60 text-emerald-800 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 text-xs font-semibold transition flex items-center space-x-1.5 cursor-pointer shadow-2xs"
+            title="Impor pengguna dalam jumlah banyak menggunakan file template Excel"
+          >
+            <Upload className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+            <span>Impor Excel</span>
+          </button>
+
+          {/* Add Single User */}
+          <button
+            onClick={openAddModal}
+            className="px-4 py-2.5 rounded-xl bg-purple-600 hover:bg-purple-700 text-white text-xs font-semibold shadow-sm transition flex items-center space-x-1.5 cursor-pointer"
+          >
+            <Plus className="w-4 h-4" />
+            <span>+ Tambah Pengguna</span>
+          </button>
         </div>
       </div>
 
-      {/* Roster Lock Information Banner */}
-      <div className="p-4 rounded-2xl bg-amber-50/80 dark:bg-amber-950/30 border border-amber-200/80 dark:border-amber-800/60 flex items-start space-x-3 text-xs text-amber-900 dark:text-amber-200">
-        <div className="p-1.5 rounded-lg bg-amber-100 dark:bg-amber-900/60 text-amber-700 dark:text-amber-300 shrink-0 mt-0.5">
-          <ShieldCheck className="w-4 h-4" />
+      {/* Quick Action Info Banner */}
+      <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-850 border border-slate-200 dark:border-slate-800 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs text-slate-600 dark:text-slate-300">
+        <div className="flex items-center space-x-2.5">
+          <FileSpreadsheet className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
+          <span>
+            Unduh format resmi template Excel untuk menambahkan atau memperbarui tenaga pendidik secara massal.
+          </span>
         </div>
-        <div className="space-y-1">
-          <div className="font-bold flex items-center space-x-2">
-            <span>Manajemen Pengguna Terkunci (Fixed Official Roster)</span>
-            <span className="text-[10px] bg-amber-200 dark:bg-amber-900/80 text-amber-900 dark:text-amber-200 px-2 py-0.5 rounded-full font-semibold">
-              Kunci Kebijakan Aktif
-            </span>
-          </div>
-          <p className="text-amber-800 dark:text-amber-300/90 leading-relaxed text-[11px]">
-            Fitur penambahan dan penghapusan pengguna dinonaktifkan untuk menjaga kestabilan penugasan review soal, integritas hak akses (RBAC), serta konsistensi catatan audit trail di Google Spreadsheet. Anda tetap dapat memperbarui detail profil dan status keaktifan akun.
-          </p>
-        </div>
+        <button
+          onClick={downloadUserExcelTemplate}
+          className="px-3 py-1.5 rounded-lg bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-emerald-700 dark:text-emerald-300 font-semibold border border-emerald-200 dark:border-emerald-800/80 transition flex items-center space-x-1.5 cursor-pointer shrink-0 text-xs"
+        >
+          <Download className="w-3.5 h-3.5" />
+          <span>Unduh Template Excel (.xlsx)</span>
+        </button>
       </div>
 
       {/* Feedback Alert */}
@@ -156,9 +335,9 @@ export const UserManagementView: React.FC = () => {
         >
           <div className="flex items-center space-x-2">
             {feedbackMsg.type === 'success' ? (
-              <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+              <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
             ) : (
-              <XCircle className="w-4 h-4 text-rose-600 dark:text-rose-400" />
+              <XCircle className="w-4 h-4 text-rose-600 dark:text-rose-400 shrink-0" />
             )}
             <span className="font-medium">{feedbackMsg.text}</span>
           </div>
@@ -217,8 +396,8 @@ export const UserManagementView: React.FC = () => {
                 <th className="py-3.5 px-4">Peran (Role)</th>
                 <th className="py-3.5 px-4">Departemen / Mapel</th>
                 <th className="py-3.5 px-4">Status</th>
-                <th className="py-3.5 px-4">Keamanan Kata Sandi</th>
-                <th className="py-3.5 px-4 text-right">Opsi Profil</th>
+                <th className="py-3.5 px-4">Kata Sandi</th>
+                <th className="py-3.5 px-4 text-right">Aksi</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 dark:divide-slate-800/80">
@@ -295,28 +474,37 @@ export const UserManagementView: React.FC = () => {
                       {/* Password Security Status */}
                       <td className="py-3.5 px-4">
                         {isDefaultPass ? (
-                          <span className="inline-flex items-center space-x-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-50 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800" title="Akun masih menggunakan kata sandi default. Pengguna akan diminta mengganti saat login.">
+                          <span className="inline-flex items-center space-x-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-50 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800" title="Akun masih menggunakan kata sandi default.">
                             <Key className="w-3 h-3 text-amber-500" />
-                            <span>Default (Perlu Diganti)</span>
+                            <span>Default</span>
                           </span>
                         ) : (
                           <span className="inline-flex items-center space-x-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800" title="Kata sandi telah diperbarui oleh pengguna">
                             <ShieldCheck className="w-3 h-3 text-emerald-500" />
-                            <span>Kustom (Aman)</span>
+                            <span>Kustom</span>
                           </span>
                         )}
                       </td>
 
                       {/* Actions */}
-                      <td className="py-3.5 px-4 text-right">
+                      <td className="py-3.5 px-4 text-right space-x-1">
                         <button
                           onClick={() => openEditModal(user)}
                           className="px-2.5 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition inline-flex items-center space-x-1 text-[11px] font-semibold cursor-pointer"
                           title="Lihat / Edit Profil Pengguna"
                         >
                           <Edit2 className="w-3 h-3 text-purple-600 dark:text-purple-400" />
-                          <span>Detail Profil</span>
+                          <span>Edit</span>
                         </button>
+                        {!isCurrent && (
+                          <button
+                            onClick={() => handleDeleteUser(user)}
+                            className="p-1.5 rounded-xl border border-rose-200 dark:border-rose-900/50 text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/50 transition inline-flex items-center text-[11px] cursor-pointer"
+                            title="Hapus Pengguna"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        )}
                       </td>
                     </tr>
                   );
@@ -326,17 +514,129 @@ export const UserManagementView: React.FC = () => {
           </table>
         </div>
 
-        {/* Table Footer with Lock summary */}
+        {/* Table Footer */}
         <div className="px-4 py-3 bg-slate-50/50 dark:bg-slate-800/40 border-t border-slate-200 dark:border-slate-800 flex items-center justify-between text-[11px] text-slate-500 dark:text-slate-400">
           <div className="flex items-center space-x-1.5">
             <Info className="w-3.5 h-3.5 text-slate-400" />
-            <span>Total {users.length} akun terdaftar dalam roster resmi TKAD Adiwerna</span>
+            <span>Total {users.length} akun pengguna terdaftar</span>
           </div>
-          <span className="font-semibold text-emerald-700 dark:text-emerald-400">
-            RBAC & Sinkronisasi Aktif
+          <span className="font-semibold text-purple-700 dark:text-purple-400">
+            Database Ganda: Firebase Firestore & Google Sheets
           </span>
         </div>
       </div>
+
+      {/* MODAL: Tambah Pengguna Baru */}
+      {isAddModalOpen && (
+        <div className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-slate-900 w-full max-w-lg rounded-3xl border border-slate-200 dark:border-slate-800 shadow-2xl p-6 space-y-5 animate-in fade-in">
+            <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
+              <div className="flex items-center space-x-2">
+                <div className="p-2 rounded-xl bg-purple-100 dark:bg-purple-950/60 text-purple-700 dark:text-purple-300">
+                  <Plus className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-slate-900 dark:text-white text-base">Tambah Pengguna Baru</h3>
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400">Daftarkan akun pendidik / staf baru ke sistem</p>
+                </div>
+              </div>
+              <button onClick={() => setIsAddModalOpen(false)} className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 cursor-pointer">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleCreateUser} className="space-y-4 text-xs">
+              <div>
+                <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">Nama Lengkap & Gelar *</label>
+                <input
+                  type="text"
+                  required
+                  placeholder="Contoh: Drs. Wahyu Hidayat, M.Pd."
+                  value={formName}
+                  onChange={(e) => setFormName(e.target.value)}
+                  className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white"
+                />
+              </div>
+
+              <div>
+                <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">Alamat Email *</label>
+                <input
+                  type="email"
+                  required
+                  placeholder="Contoh: wahyuhidayat@tkad.adiwerna"
+                  value={formEmail}
+                  onChange={(e) => setFormEmail(e.target.value)}
+                  className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">Peran (Role) *</label>
+                  <select
+                    value={formRole}
+                    onChange={(e) => setFormRole(e.target.value as UserRole)}
+                    className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white font-medium"
+                  >
+                    <option value="pembuat">Pembuat Soal</option>
+                    <option value="reviewer">Reviewer Mutu</option>
+                    <option value="admin">Administrator</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">Status Akun</label>
+                  <select
+                    value={formStatus}
+                    onChange={(e) => setFormStatus(e.target.value as any)}
+                    className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white"
+                  >
+                    <option value="aktif">Aktif</option>
+                    <option value="nonaktif">Nonaktif</option>
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">Departemen / Mata Pelajaran</label>
+                <input
+                  type="text"
+                  value={formDepartment}
+                  onChange={(e) => setFormDepartment(e.target.value)}
+                  placeholder="misal: Bahasa Indonesia, Matematika, IPAS"
+                  className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white"
+                />
+              </div>
+
+              <div>
+                <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">Kata Sandi Awal</label>
+                <input
+                  type="text"
+                  value={formPassword}
+                  onChange={(e) => setFormPassword(e.target.value)}
+                  className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white font-mono"
+                />
+              </div>
+
+              <div className="flex justify-end space-x-2 pt-3 border-t border-slate-100 dark:border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setIsAddModalOpen(false)}
+                  className="px-4 py-2 rounded-xl border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
+                >
+                  Batal
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2 rounded-xl bg-purple-600 hover:bg-purple-700 text-white font-semibold shadow-sm cursor-pointer"
+                >
+                  Simpan Pengguna
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       {/* MODAL: Edit Profil Pengguna */}
       {editingUser && (
@@ -444,6 +744,192 @@ export const UserManagementView: React.FC = () => {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: Impor Pengguna Excel */}
+      {isImportModalOpen && (
+        <div className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-slate-900 w-full max-w-2xl rounded-3xl border border-slate-200 dark:border-slate-800 shadow-2xl p-6 space-y-5 animate-in fade-in max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
+              <div className="flex items-center space-x-2">
+                <div className="p-2 rounded-xl bg-emerald-100 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300">
+                  <Upload className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-slate-900 dark:text-white text-base">Impor Pengguna dari Excel</h3>
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                    Unggah file spreadsheet .xlsx atau .csv sesuai format template resmi
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setIsImportModalOpen(false)}
+                className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* File Upload Box */}
+            <div className="space-y-4">
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".xlsx, .xls, .csv"
+                onChange={handleFileChange}
+                className="hidden"
+              />
+
+              <div
+                onClick={() => fileInputRef.current?.click()}
+                className="p-6 border-2 border-dashed border-emerald-300 dark:border-emerald-700/60 rounded-2xl bg-emerald-50/40 dark:bg-emerald-950/20 text-center space-y-2 cursor-pointer hover:bg-emerald-50 dark:hover:bg-emerald-950/30 transition"
+              >
+                <FileSpreadsheet className="w-8 h-8 text-emerald-600 dark:text-emerald-400 mx-auto" />
+                <div>
+                  <p className="text-xs font-bold text-slate-800 dark:text-slate-200">
+                    {importFile ? importFile.name : 'Klik untuk memilih file Excel (.xlsx / .csv)'}
+                  </p>
+                  <p className="text-[11px] text-slate-400 dark:text-slate-500 mt-0.5">
+                    {importFile
+                      ? `Ukuran: ${(importFile.size / 1024).toFixed(1)} KB`
+                      : 'Pastikan menggunakan template resmi agar kolom terbaca dengan tepat'}
+                  </p>
+                </div>
+              </div>
+
+              {/* Template Download Link */}
+              <div className="flex items-center justify-between text-xs bg-slate-50 dark:bg-slate-800/60 p-3 rounded-xl border border-slate-200 dark:border-slate-700">
+                <span className="text-slate-600 dark:text-slate-400 text-[11px]">Belum memiliki format template Excel?</span>
+                <button
+                  type="button"
+                  onClick={downloadUserExcelTemplate}
+                  className="text-emerald-600 dark:text-emerald-400 hover:underline font-semibold flex items-center space-x-1 cursor-pointer text-[11px]"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  <span>Unduh Template Di Sini</span>
+                </button>
+              </div>
+
+              {/* Import Mode: Append or Replace */}
+              <div className="space-y-2">
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
+                  Mode Penggabungan Data:
+                </label>
+                <div className="grid grid-cols-2 gap-3">
+                  <label
+                    className={`p-3 rounded-xl border text-xs flex items-start space-x-2.5 cursor-pointer transition ${
+                      importMode === 'append'
+                        ? 'bg-purple-50 dark:bg-purple-950/50 border-purple-300 dark:border-purple-700 text-purple-900 dark:text-purple-200'
+                        : 'border-slate-200 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-800/40 text-slate-600 dark:text-slate-400'
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      name="importMode"
+                      checked={importMode === 'append'}
+                      onChange={() => setImportMode('append')}
+                      className="mt-0.5"
+                    />
+                    <div>
+                      <span className="font-bold block">Tambahkan (Append)</span>
+                      <span className="text-[10px] text-slate-500 dark:text-slate-400">
+                        Tambahkan akun baru ke daftar yang sudah ada tanpa menghapus data lama.
+                      </span>
+                    </div>
+                  </label>
+
+                  <label
+                    className={`p-3 rounded-xl border text-xs flex items-start space-x-2.5 cursor-pointer transition ${
+                      importMode === 'replace'
+                        ? 'bg-rose-50 dark:bg-rose-950/50 border-rose-300 dark:border-rose-700 text-rose-900 dark:text-rose-200'
+                        : 'border-slate-200 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-800/40 text-slate-600 dark:text-slate-400'
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      name="importMode"
+                      checked={importMode === 'replace'}
+                      onChange={() => setImportMode('replace')}
+                      className="mt-0.5"
+                    />
+                    <div>
+                      <span className="font-bold block text-rose-700 dark:text-rose-300">Timpa Roster (Replace)</span>
+                      <span className="text-[10px] text-slate-500 dark:text-slate-400">
+                        Ganti seluruh daftar pengguna dengan data baru dari file Excel ini.
+                      </span>
+                    </div>
+                  </label>
+                </div>
+              </div>
+
+              {/* Parsing Warnings / Errors */}
+              {parseErrors.length > 0 && (
+                <div className="p-3 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 rounded-xl space-y-1 text-[11px] text-amber-800 dark:text-amber-200">
+                  <div className="font-bold flex items-center space-x-1.5">
+                    <AlertTriangle className="w-3.5 h-3.5 text-amber-600" />
+                    <span>Catatan Validasi File ({parseErrors.length}):</span>
+                  </div>
+                  <ul className="list-disc list-inside space-y-0.5 max-h-24 overflow-y-auto">
+                    {parseErrors.map((err, idx) => (
+                      <li key={idx}>{err}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              {/* Parsed Preview Table */}
+              {parsedRows.length > 0 && (
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between text-xs font-bold text-slate-800 dark:text-slate-200">
+                    <span>Pratinjau Data Valid ({parsedRows.length} Pengguna):</span>
+                    <span className="text-emerald-600 dark:text-emerald-400 font-semibold text-[11px]">Siap Diimpor</span>
+                  </div>
+                  <div className="border border-slate-200 dark:border-slate-700 rounded-xl overflow-hidden max-h-48 overflow-y-auto">
+                    <table className="w-full text-left text-[11px]">
+                      <thead className="bg-slate-100 dark:bg-slate-800 text-slate-500 uppercase tracking-wider text-[9px] font-bold sticky top-0">
+                        <tr>
+                          <th className="p-2">Nama</th>
+                          <th className="p-2">Email</th>
+                          <th className="p-2">Peran</th>
+                          <th className="p-2">Departemen</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                        {parsedRows.map((row, idx) => (
+                          <tr key={idx} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
+                            <td className="p-2 font-medium text-slate-900 dark:text-white">{row.name}</td>
+                            <td className="p-2 text-slate-500 dark:text-slate-400">{row.email}</td>
+                            <td className="p-2 capitalize">{row.role}</td>
+                            <td className="p-2">{row.department}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="flex justify-end space-x-2 pt-3 border-t border-slate-100 dark:border-slate-800">
+              <button
+                type="button"
+                onClick={() => setIsImportModalOpen(false)}
+                className="px-4 py-2 rounded-xl border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer text-xs"
+              >
+                Batal
+              </button>
+              <button
+                type="button"
+                disabled={parsedRows.length === 0 || isParsing}
+                onClick={handleExecuteImport}
+                className="px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-xs shadow-sm cursor-pointer disabled:opacity-50 flex items-center space-x-1.5"
+              >
+                <Check className="w-3.5 h-3.5" />
+                <span>Impor {parsedRows.length} Pengguna</span>
+              </button>
+            </div>
           </div>
         </div>
       )}

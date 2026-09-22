@@ -12,6 +12,7 @@ import {
   QuestionStatus,
   DifficultyLevel,
   ChoiceOption,
+  QuestionPacket,
 } from '../types';
 import {
   INITIAL_QUESTIONS,
@@ -20,6 +21,15 @@ import {
   INITIAL_AUDIT_LOGS,
   INITIAL_NOTIFICATIONS,
 } from '../data/initialData';
+import {
+  collection,
+  doc,
+  setDoc,
+  deleteDoc,
+  onSnapshot,
+} from 'firebase/firestore';
+import { db, testFirestoreConnection, handleFirestoreError, OperationType } from '../lib/firebase';
+import { ParsedUserRow } from '../utils/excelUserUtils';
 
 interface AppContextType {
   // Auth & Current User
@@ -33,11 +43,12 @@ interface AppContextType {
   theme: 'light' | 'dark';
   toggleTheme: () => void;
 
-  // Users CRUD
+  // Users CRUD & Excel Import/Export
   users: User[];
-  addUser: (data: Omit<User, 'id'>) => User;
+  addUser: (data: Omit<User, 'id'>) => { success: boolean; message: string; user?: User };
   updateUser: (id: string, data: Partial<User>) => void;
   deleteUser: (id: string) => { success: boolean; message: string };
+  importUsers: (importedUsers: ParsedUserRow[], replaceExisting?: boolean) => { addedCount: number; updatedCount: number; errors: string[] };
   changePassword: (oldPassword: string, newPassword: string) => Promise<{ success: boolean; message: string }>;
   showChangePasswordModal: boolean;
   setShowChangePasswordModal: (show: boolean) => void;
@@ -46,6 +57,7 @@ interface AppContextType {
 
   // Data Collections
   questions: Question[];
+  packets: QuestionPacket[];
   categories: CategoryMetadata[];
   auditLogs: AuditLog[];
   notifications: AppNotification[];
@@ -66,12 +78,29 @@ interface AppContextType {
   editingQuestionId: string | null;
   setEditingQuestionId: (id: string | null) => void;
 
-  // Question Actions
+  // Question Actions & Bulk Operations
   createQuestion: (data: Partial<Question>, submitDirectly: boolean) => Question;
   updateQuestion: (id: string, data: Partial<Question>, submitForReview: boolean) => void;
   recallQuestion: (id: string) => void;
   duplicateQuestion: (id: string) => void;
   deleteQuestion: (id: string) => void;
+  bulkDeleteQuestions: (ids: string[]) => { count: number };
+
+  // Question Packet Actions
+  createPacket: (data: {
+    code: string;
+    title: string;
+    description?: string;
+    subtest: string;
+    questionIds: string[];
+    targetClass?: string;
+    academicYear?: string;
+    status?: 'draft' | 'aktif' | 'arsip';
+  }) => QuestionPacket;
+  updatePacket: (id: string, data: Partial<QuestionPacket>) => void;
+  deletePacket: (id: string) => void;
+  addQuestionsToPacket: (packetId: string, questionIds: string[]) => void;
+  removeQuestionFromPacket: (packetId: string, questionId: string) => void;
   
   // Review Actions
   submitReview: (
@@ -104,6 +133,12 @@ interface AppContextType {
   syncMessage: string | null;
   syncWithGoogleSheets: (options?: { silent?: boolean }) => Promise<{ success: boolean; message: string }>;
   pullFromGoogleSheets: () => Promise<{ success: boolean; message: string; count?: number }>;
+
+  // Dual Database (Firebase Firestore + Google Sheets)
+  dualSyncStatus: 'idle' | 'syncing' | 'success' | 'error';
+  isDualSyncing: boolean;
+  lastDualSyncTime: string | null;
+  dualSyncDatabases: (options?: { forcePushToSheets?: boolean }) => Promise<{ success: boolean; message: string; firestoreCount: number; sheetsCount: number }>;
 
   // Sidebar State for Mobile/Tablet
   isSidebarMinimized: boolean;
@@ -396,6 +431,28 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   });
 
+  // Packets State
+  const [packets, setPackets] = useState<QuestionPacket[]>(() => {
+    try {
+      const saved = localStorage.getItem('tkad_packets_v3');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) return parsed;
+      }
+      return [];
+    } catch {
+      return [];
+    }
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('tkad_packets_v3', JSON.stringify(packets));
+    } catch (e) {
+      console.warn(e);
+    }
+  }, [packets]);
+
   const [categories, setCategories] = useState<CategoryMetadata[]>(() => {
     try {
       const saved = localStorage.getItem(STORAGE_KEY_CATEGORIES);
@@ -532,6 +589,112 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     localStorage.setItem(STORAGE_KEY_GAS_URL, gasWebhookUrl);
   }, [gasWebhookUrl]);
 
+  // Connect and sync with Firebase Firestore in real-time
+  useEffect(() => {
+    testFirestoreConnection();
+
+    // Listen for Questions from Firestore
+    const unsubQuestions = onSnapshot(
+      collection(db, 'questions'),
+      (snapshot) => {
+        if (!snapshot.empty) {
+          const list: Question[] = [];
+          snapshot.forEach((d) => list.push(d.data() as Question));
+          setQuestions(list);
+        }
+      },
+      (error) => {
+        handleFirestoreError(error, OperationType.GET, 'questions');
+      }
+    );
+
+    // Listen for Users from Firestore
+    const unsubUsers = onSnapshot(
+      collection(db, 'users'),
+      (snapshot) => {
+        if (!snapshot.empty) {
+          const list: User[] = [];
+          snapshot.forEach((d) => list.push(d.data() as User));
+          setUsers(list);
+        }
+      },
+      (error) => {
+        handleFirestoreError(error, OperationType.GET, 'users');
+      }
+    );
+
+    // Listen for Categories from Firestore
+    const unsubCategories = onSnapshot(
+      collection(db, 'categories'),
+      (snapshot) => {
+        if (!snapshot.empty) {
+          const list: CategoryMetadata[] = [];
+          snapshot.forEach((d) => list.push(d.data() as CategoryMetadata));
+          setCategories(list);
+        }
+      },
+      (error) => {
+        handleFirestoreError(error, OperationType.GET, 'categories');
+      }
+    );
+
+    // Listen for Question Packets from Firestore
+    const unsubPackets = onSnapshot(
+      collection(db, 'question_packets'),
+      (snapshot) => {
+        if (!snapshot.empty) {
+          const list: QuestionPacket[] = [];
+          snapshot.forEach((d) => list.push(d.data() as QuestionPacket));
+          setPackets(list);
+        }
+      },
+      (error) => {
+        handleFirestoreError(error, OperationType.GET, 'question_packets');
+      }
+    );
+
+    // Listen for Audit Logs from Firestore
+    const unsubLogs = onSnapshot(
+      collection(db, 'audit_logs'),
+      (snapshot) => {
+        if (!snapshot.empty) {
+          const list: AuditLog[] = [];
+          snapshot.forEach((d) => list.push(d.data() as AuditLog));
+          list.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+          setAuditLogs(list);
+        }
+      },
+      (error) => {
+        handleFirestoreError(error, OperationType.GET, 'audit_logs');
+      }
+    );
+
+    // Listen for Notifications from Firestore
+    const unsubNotifs = onSnapshot(
+      collection(db, 'notifications'),
+      (snapshot) => {
+        if (!snapshot.empty) {
+          const list: AppNotification[] = [];
+          snapshot.forEach((d) => list.push(d.data() as AppNotification));
+          list.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+          setNotifications(list);
+        }
+      },
+      (error) => {
+        handleFirestoreError(error, OperationType.GET, 'notifications');
+      }
+    );
+
+    return () => {
+      unsubQuestions();
+      unsubUsers();
+      unsubCategories();
+      unsubPackets();
+      unsubLogs();
+      unsubNotifs();
+    };
+  }, []);
+
   useEffect(() => {
     if (isAuthenticated) {
       localStorage.setItem(STORAGE_KEY_AUTH, 'true');
@@ -624,6 +787,71 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   }, [currentUser.role, activeTab]);
 
+  // Helpers to persist data to Firestore
+  const syncQuestionToFirestore = async (q: Question) => {
+    try {
+      await setDoc(doc(db, 'questions', q.id), q);
+    } catch (err) {
+      console.warn('Firestore sync question error:', err);
+    }
+  };
+
+  const removeQuestionFromFirestore = async (id: string) => {
+    try {
+      await deleteDoc(doc(db, 'questions', id));
+    } catch (err) {
+      console.warn('Firestore remove question error:', err);
+    }
+  };
+
+  const syncLogToFirestore = async (log: AuditLog) => {
+    try {
+      await setDoc(doc(db, 'audit_logs', log.id), log);
+    } catch (err) {
+      console.warn('Firestore sync log error:', err);
+    }
+  };
+
+  const syncNotifToFirestore = async (notif: AppNotification) => {
+    try {
+      await setDoc(doc(db, 'notifications', notif.id), notif);
+    } catch (err) {
+      console.warn('Firestore sync notif error:', err);
+    }
+  };
+
+  const syncUserToFirestore = async (u: User) => {
+    try {
+      await setDoc(doc(db, 'users', u.id), u);
+    } catch (err) {
+      console.warn('Firestore sync user error:', err);
+    }
+  };
+
+  const removeUserFromFirestore = async (id: string) => {
+    try {
+      await deleteDoc(doc(db, 'users', id));
+    } catch (err) {
+      console.warn('Firestore remove user error:', err);
+    }
+  };
+
+  const syncCategoryToFirestore = async (cat: CategoryMetadata) => {
+    try {
+      await setDoc(doc(db, 'categories', cat.id), cat);
+    } catch (err) {
+      console.warn('Firestore sync category error:', err);
+    }
+  };
+
+  const removeCategoryFromFirestore = async (id: string) => {
+    try {
+      await deleteDoc(doc(db, 'categories', id));
+    } catch (err) {
+      console.warn('Firestore remove category error:', err);
+    }
+  };
+
   const addAuditLog = (
     action: AuditLog['action'],
     description: string,
@@ -644,6 +872,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       details,
     };
     setAuditLogs((prev) => [newLog, ...prev]);
+    syncLogToFirestore(newLog);
   };
 
   const addNotification = (
@@ -664,6 +893,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       questionId,
     };
     setNotifications((prev) => [newNotif, ...prev]);
+    syncNotifToFirestore(newNotif);
   };
 
   // Auth Operations
@@ -746,6 +976,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setUsers(newUsers);
     setCurrentUser(updatedUser);
     setIsPasswordChangeForced(false);
+    syncUserToFirestore(updatedUser);
 
     try {
       localStorage.setItem(STORAGE_KEY_USERS, JSON.stringify(newUsers));
@@ -780,31 +1011,126 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
   };
 
-  // User Management CRUD (Locked Roster: add and delete are locked)
-  const addUser = (_userData: Omit<User, 'id'>): User => {
-    console.warn('Manajemen pengguna dikunci: Penambahan pengguna baru dinonaktifkan.');
-    return currentUser;
+  // User Management CRUD & Excel Import
+  const addUser = (userData: Omit<User, 'id'>): { success: boolean; message: string; user?: User } => {
+    // Validate uniqueness of email
+    const existing = users.find((u) => u.email.trim().toLowerCase() === userData.email.trim().toLowerCase());
+    if (existing) {
+      return { success: false, message: `Email ${userData.email} sudah digunakan oleh ${existing.name}.` };
+    }
+
+    const newId = `usr-${Date.now()}`;
+    const newUser: User = {
+      ...userData,
+      id: newId,
+      password: userData.password || 'password123',
+      isDefaultPassword: userData.isDefaultPassword !== undefined ? userData.isDefaultPassword : true,
+    };
+
+    setUsers((prev) => [...prev, newUser]);
+    syncUserToFirestore(newUser);
+    addAuditLog('CREATE_USER', `Menambahkan pengguna baru ${newUser.name} (${newUser.email}) role: ${newUser.role}`);
+    return { success: true, message: `Pengguna ${newUser.name} berhasil ditambahkan!`, user: newUser };
   };
 
   const updateUser = (id: string, data: Partial<User>) => {
+    let updatedUserObj: User | null = null;
     setUsers((prev) =>
       prev.map((u) => {
         if (u.id !== id) return u;
         const updated = { ...u, ...data };
+        updatedUserObj = updated;
         if (currentUser.id === id) {
           setCurrentUser(updated);
         }
         return updated;
       })
     );
+    if (updatedUserObj) {
+      syncUserToFirestore(updatedUserObj);
+    }
     addAuditLog('UPDATE_USER', `Administrator memperbarui data pengguna ID: ${id}`);
   };
 
-  const deleteUser = (_id: string): { success: boolean; message: string } => {
-    return {
-      success: false,
-      message: 'Manajemen pengguna dikunci: Penghapusan pengguna dinonaktifkan sesuai kebijakan institusi.',
-    };
+  const deleteUser = (id: string): { success: boolean; message: string } => {
+    if (currentUser.id === id) {
+      return {
+        success: false,
+        message: 'Tidak dapat menghapus akun Anda sendiri yang sedang aktif digunakan.',
+      };
+    }
+
+    const targetUser = users.find((u) => u.id === id);
+    if (!targetUser) {
+      return { success: false, message: 'Pengguna tidak ditemukan.' };
+    }
+
+    setUsers((prev) => prev.filter((u) => u.id !== id));
+    removeUserFromFirestore(id);
+    addAuditLog('DELETE_USER', `Menghapus pengguna ${targetUser.name} (${targetUser.email})`);
+    return { success: true, message: `Pengguna ${targetUser.name} berhasil dihapus dari sistem.` };
+  };
+
+  const importUsers = (
+    importedUsers: ParsedUserRow[],
+    replaceExisting = false
+  ): { addedCount: number; updatedCount: number; errors: string[] } => {
+    let addedCount = 0;
+    let updatedCount = 0;
+    const errors: string[] = [];
+
+    const updatedUserList = [...users];
+
+    importedUsers.forEach((row, index) => {
+      if (!row.name || !row.email) {
+        errors.push(`Baris ${index + 2}: Nama atau Email kosong.`);
+        return;
+      }
+
+      const existingIndex = updatedUserList.findIndex(
+        (u) => u.email.trim().toLowerCase() === row.email.trim().toLowerCase()
+      );
+
+      if (existingIndex >= 0) {
+        if (replaceExisting) {
+          const existing = updatedUserList[existingIndex];
+          const updated: User = {
+            ...existing,
+            name: row.name,
+            role: row.role,
+            department: row.department,
+            status: row.status,
+            password: row.password || existing.password || 'password123',
+            isDefaultPassword: row.password ? false : existing.isDefaultPassword,
+          };
+          updatedUserList[existingIndex] = updated;
+          syncUserToFirestore(updated);
+          updatedCount++;
+        }
+      } else {
+        const newUser: User = {
+          id: `usr-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+          name: row.name,
+          email: row.email,
+          role: row.role,
+          department: row.department,
+          status: row.status,
+          password: row.password || 'password123',
+          isDefaultPassword: !row.password,
+        };
+        updatedUserList.push(newUser);
+        syncUserToFirestore(newUser);
+        addedCount++;
+      }
+    });
+
+    setUsers(updatedUserList);
+    addAuditLog(
+      'IMPORT_USERS',
+      `Impor pengguna dari template Excel: ${addedCount} ditambahkan, ${updatedCount} diperbarui`
+    );
+
+    return { addedCount, updatedCount, errors };
   };
 
   // Question CRUD & Workflows
@@ -853,6 +1179,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
 
     setQuestions((prev) => [newQuestion, ...prev]);
+    syncQuestionToFirestore(newQuestion);
 
     addAuditLog(
       submitDirectly ? 'SUBMIT_REVIEW' : 'CREATE_QUESTION',
@@ -879,6 +1206,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const updateQuestion = (id: string, data: Partial<Question>, submitForReview: boolean) => {
+    let updatedQ: Question | null = null;
     setQuestions((prev) =>
       prev.map((q) => {
         if (q.id !== id) return q;
@@ -921,6 +1249,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           versions: updatedVersions,
         };
 
+        updatedQ = updated;
+
         addAuditLog(
           submitForReview ? 'SUBMIT_REVIEW' : 'UPDATE_QUESTION',
           submitForReview
@@ -949,23 +1279,26 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         return updated;
       })
     );
+
+    if (updatedQ) {
+      syncQuestionToFirestore(updatedQ);
+    }
   };
 
   const recallQuestion = (id: string) => {
     const q = questions.find((item) => item.id === id);
     if (!q || q.status !== 'menunggu_review') return;
 
+    const updated: Question = {
+      ...q,
+      status: 'draft',
+      updatedAt: new Date().toISOString(),
+    };
+
     setQuestions((prev) =>
-      prev.map((item) =>
-        item.id === id
-          ? {
-              ...item,
-              status: 'draft',
-              updatedAt: new Date().toISOString(),
-            }
-          : item
-      )
+      prev.map((item) => (item.id === id ? updated : item))
     );
+    syncQuestionToFirestore(updated);
 
     addAuditLog('RECALL', `Menarik kembali soal ${q.code} dari antrian review menjadi draf`, q.id, q.code, {
       field: 'status',
@@ -1016,6 +1349,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
 
     setQuestions((prev) => [cloned, ...prev]);
+    syncQuestionToFirestore(cloned);
     addAuditLog('DUPLICATE', `Menduplikasi soal ${original.code} menjadi variasi baru ${newCode}`, newId, newCode);
   };
 
@@ -1025,7 +1359,177 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     setQuestions((prev) => prev.filter((item) => item.id !== id));
     setDeletedQuestionIds((prev) => Array.from(new Set([...prev, id])));
+    removeQuestionFromFirestore(id);
     addAuditLog('UPDATE_QUESTION', `Menghapus butir soal ${q.code} (Status diubah menjadi TIDAK_AKTIF di basis data Spreadsheet)`, q.id, q.code);
+  };
+
+  const bulkDeleteQuestions = (ids: string[]): { count: number } => {
+    if (!ids.length) return { count: 0 };
+    const idSet = new Set(ids);
+    const deletedCount = questions.filter((q) => idSet.has(q.id)).length;
+
+    setQuestions((prev) => prev.filter((q) => !idSet.has(q.id)));
+    setDeletedQuestionIds((prev) => Array.from(new Set([...prev, ...ids])));
+    ids.forEach((id) => removeQuestionFromFirestore(id));
+
+    addAuditLog('UPDATE_QUESTION', `Menghapus massal ${deletedCount} butir soal dari Bank Soal.`);
+    return { count: deletedCount };
+  };
+
+  // Question Packet CRUD Actions
+  const syncPacketToFirestore = async (packet: QuestionPacket) => {
+    try {
+      await setDoc(doc(db, 'question_packets', packet.id), packet);
+    } catch (err) {
+      console.warn('Firestore sync packet error:', err);
+    }
+  };
+
+  const removePacketFromFirestore = async (id: string) => {
+    try {
+      await deleteDoc(doc(db, 'question_packets', id));
+    } catch (err) {
+      console.warn('Firestore remove packet error:', err);
+    }
+  };
+
+  const createPacket = (data: {
+    code: string;
+    title: string;
+    description?: string;
+    subtest: string;
+    questionIds: string[];
+    targetClass?: string;
+    academicYear?: string;
+    status?: 'draft' | 'aktif' | 'arsip';
+  }): QuestionPacket => {
+    const newPacket: QuestionPacket = {
+      id: `pkt-${Date.now()}`,
+      code: data.code,
+      title: data.title,
+      description: data.description || '',
+      subtest: data.subtest,
+      questionIds: data.questionIds,
+      totalQuestions: data.questionIds.length,
+      targetClass: data.targetClass,
+      academicYear: data.academicYear,
+      status: data.status || 'aktif',
+      createdById: currentUser.id,
+      createdByName: currentUser.name,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+
+    setPackets((prev) => [newPacket, ...prev]);
+    syncPacketToFirestore(newPacket);
+
+    // Update packetIds on associated questions
+    if (data.questionIds.length > 0) {
+      const qIdSet = new Set(data.questionIds);
+      setQuestions((prev) =>
+        prev.map((q) => {
+          if (qIdSet.has(q.id)) {
+            const currentPktIds = q.packetIds || [];
+            if (!currentPktIds.includes(newPacket.id)) {
+              const updatedQ = { ...q, packetIds: [...currentPktIds, newPacket.id] };
+              syncQuestionToFirestore(updatedQ);
+              return updatedQ;
+            }
+          }
+          return q;
+        })
+      );
+    }
+
+    addAuditLog('CREATE_QUESTION', `Membuat paket soal baru: "${newPacket.title}" (${newPacket.code}) berisi ${newPacket.totalQuestions} butir soal.`);
+    return newPacket;
+  };
+
+  const updatePacket = (id: string, data: Partial<QuestionPacket>) => {
+    let updatedPacket: QuestionPacket | null = null;
+    setPackets((prev) =>
+      prev.map((p) => {
+        if (p.id !== id) return p;
+        const total = data.questionIds !== undefined ? data.questionIds.length : p.totalQuestions;
+        const updated = { ...p, ...data, totalQuestions: total, updatedAt: new Date().toISOString() };
+        updatedPacket = updated;
+        return updated;
+      })
+    );
+
+    if (updatedPacket) {
+      syncPacketToFirestore(updatedPacket);
+    }
+    addAuditLog('UPDATE_QUESTION', `Memperbarui data paket soal ID: ${id}`);
+  };
+
+  const deletePacket = (id: string) => {
+    const target = packets.find((p) => p.id === id);
+    setPackets((prev) => prev.filter((p) => p.id !== id));
+    removePacketFromFirestore(id);
+    if (target) {
+      addAuditLog('UPDATE_QUESTION', `Menghapus paket soal: "${target.title}" (${target.code})`);
+    }
+  };
+
+  const addQuestionsToPacket = (packetId: string, questionIds: string[]) => {
+    let targetPkt: QuestionPacket | null = null;
+    setPackets((prev) =>
+      prev.map((p) => {
+        if (p.id !== packetId) return p;
+        const combined = Array.from(new Set([...p.questionIds, ...questionIds]));
+        const updated = {
+          ...p,
+          questionIds: combined,
+          totalQuestions: combined.length,
+          updatedAt: new Date().toISOString(),
+        };
+        targetPkt = updated;
+        return updated;
+      })
+    );
+
+    if (targetPkt) {
+      syncPacketToFirestore(targetPkt);
+    }
+
+    // Update question packetIds
+    const qIdSet = new Set(questionIds);
+    setQuestions((prev) =>
+      prev.map((q) => {
+        if (qIdSet.has(q.id)) {
+          const currentPktIds = q.packetIds || [];
+          if (!currentPktIds.includes(packetId)) {
+            const updatedQ = { ...q, packetIds: [...currentPktIds, packetId] };
+            syncQuestionToFirestore(updatedQ);
+            return updatedQ;
+          }
+        }
+        return q;
+      })
+    );
+  };
+
+  const removeQuestionFromPacket = (packetId: string, questionId: string) => {
+    let targetPkt: QuestionPacket | null = null;
+    setPackets((prev) =>
+      prev.map((p) => {
+        if (p.id !== packetId) return p;
+        const filtered = p.questionIds.filter((qid) => qid !== questionId);
+        const updated = {
+          ...p,
+          questionIds: filtered,
+          totalQuestions: filtered.length,
+          updatedAt: new Date().toISOString(),
+        };
+        targetPkt = updated;
+        return updated;
+      })
+    );
+
+    if (targetPkt) {
+      syncPacketToFirestore(targetPkt);
+    }
   };
 
   const submitReview = (
@@ -1066,11 +1570,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       optionComments,
     };
 
+    let updatedQ: Question | null = null;
     setQuestions((prev) =>
       prev.map((q) => {
         if (q.id !== questionId) return q;
 
-        return {
+        const updated = {
           ...q,
           status: newStatus,
           updatedAt: new Date().toISOString(),
@@ -1086,8 +1591,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             ...q.versions,
           ],
         };
+        updatedQ = updated;
+        return updated;
       })
     );
+
+    if (updatedQ) {
+      syncQuestionToFirestore(updatedQ);
+    }
 
     addAuditLog(
       actionLog,
@@ -1112,13 +1623,23 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const addCategory = (cat: CategoryMetadata) => {
     setCategories((prev) => [...prev, cat]);
+    syncCategoryToFirestore(cat);
     addAuditLog('CONFIG_CHANGE', `Menambahkan subtes kategori baru: ${cat.name}`);
   };
 
   const updateCategory = (id: string, cat: Partial<CategoryMetadata>) => {
+    let updatedCat: CategoryMetadata | null = null;
     setCategories((prev) =>
-      prev.map((item) => (item.id === id ? { ...item, ...cat } : item))
+      prev.map((item) => {
+        if (item.id !== id) return item;
+        const updated = { ...item, ...cat };
+        updatedCat = updated;
+        return updated;
+      })
     );
+    if (updatedCat) {
+      syncCategoryToFirestore(updatedCat);
+    }
     addAuditLog('CONFIG_CHANGE', `Memperbarui subtes kategori ID: ${id}`);
   };
 
@@ -1126,6 +1647,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const target = categories.find((c) => c.id === id);
     if (!target) return;
     setCategories((prev) => prev.filter((c) => c.id !== id));
+    removeCategoryFromFirestore(id);
     addAuditLog('CONFIG_CHANGE', `Menghapus subtes kategori: ${target.name}`);
   };
 
@@ -1388,6 +1910,129 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return () => clearTimeout(timer);
   }, [users, autoSyncEnabled]);
 
+  // Dual Database Sync (Firebase Firestore + Google Sheets)
+  const [dualSyncStatus, setDualSyncStatus] = useState<'idle' | 'syncing' | 'success' | 'error'>('idle');
+  const [isDualSyncing, setIsDualSyncing] = useState<boolean>(false);
+  const [lastDualSyncTime, setLastDualSyncTime] = useState<string | null>(null);
+
+  const dualSyncDatabases = async (options?: { forcePushToSheets?: boolean }): Promise<{
+    success: boolean;
+    message: string;
+    firestoreCount: number;
+    sheetsCount: number;
+  }> => {
+    setIsDualSyncing(true);
+    setDualSyncStatus('syncing');
+
+    let firestoreSuccess = false;
+    let sheetsSuccess = false;
+    let firestoreCount = 0;
+    let sheetsCount = 0;
+    let errorMsg = '';
+
+    try {
+      // 1. Sync all Questions to Firestore
+      for (const q of questions) {
+        try {
+          await setDoc(doc(db, 'questions', q.id), q);
+          firestoreCount++;
+        } catch (e) {
+          console.warn('Sync question to firestore error:', e);
+        }
+      }
+
+      // 2. Sync all Users to Firestore
+      for (const u of users) {
+        try {
+          await setDoc(doc(db, 'users', u.id), u);
+        } catch (e) {
+          console.warn('Sync user to firestore error:', e);
+        }
+      }
+
+      // 3. Sync all Categories to Firestore
+      for (const cat of categories) {
+        try {
+          await setDoc(doc(db, 'categories', cat.id), cat);
+        } catch (e) {
+          console.warn('Sync category to firestore error:', e);
+        }
+      }
+
+      // 4. Sync all Packets to Firestore
+      for (const pkt of packets) {
+        try {
+          await setDoc(doc(db, 'question_packets', pkt.id), pkt);
+        } catch (e) {
+          console.warn('Sync packet to firestore error:', e);
+        }
+      }
+
+      // 5. Sync latest Audit Logs to Firestore
+      for (const log of auditLogs.slice(0, 30)) {
+        try {
+          await setDoc(doc(db, 'audit_logs', log.id), log);
+        } catch (e) {
+          console.warn('Sync audit log to firestore error:', e);
+        }
+      }
+
+      firestoreSuccess = true;
+
+      // 6. Push to Google Sheets via GAS Webhook
+      const sheetsResult = await syncWithGoogleSheets({ silent: false });
+      if (sheetsResult.success) {
+        sheetsSuccess = true;
+        sheetsCount = questions.length;
+      } else {
+        errorMsg = sheetsResult.message;
+      }
+
+      const timestampStr = new Date().toLocaleTimeString('id-ID');
+      setLastDualSyncTime(timestampStr);
+
+      if (firestoreSuccess && sheetsSuccess) {
+        setDualSyncStatus('success');
+        addAuditLog(
+          'SYNC_GAS',
+          `Sinkronisasi ganda sukses: ${firestoreCount} data ke Firebase Firestore dan ${questions.length} butir soal ke Google Sheets.`
+        );
+        return {
+          success: true,
+          message: `Database ganda berhasil disinkronkan (${questions.length} soal & ${users.length} pengguna tersimpan di Firebase Firestore & Google Sheets).`,
+          firestoreCount,
+          sheetsCount,
+        };
+      } else if (firestoreSuccess) {
+        setDualSyncStatus('success');
+        return {
+          success: true,
+          message: `Data berhasil disimpan ke Firebase Firestore (${firestoreCount} entri). Google Sheets: ${errorMsg || 'Dalam antrean'}`,
+          firestoreCount,
+          sheetsCount,
+        };
+      } else {
+        setDualSyncStatus('error');
+        return {
+          success: false,
+          message: `Sinkronisasi gagal: ${errorMsg || 'Koneksi database bermasalah'}`,
+          firestoreCount,
+          sheetsCount,
+        };
+      }
+    } catch (err: any) {
+      setDualSyncStatus('error');
+      return {
+        success: false,
+        message: `Terjadi kendala sinkronisasi database ganda: ${err?.message || err}`,
+        firestoreCount,
+        sheetsCount,
+      };
+    } finally {
+      setIsDualSyncing(false);
+    }
+  };
+
   const visibleQuestions = React.useMemo(() => {
     return questions.filter((q) => isUserAuthorizedForSubtest(currentUser, q.subtest));
   }, [questions, currentUser]);
@@ -1413,12 +2058,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         addUser,
         updateUser,
         deleteUser,
+        importUsers,
         changePassword,
         showChangePasswordModal,
         setShowChangePasswordModal,
         isPasswordChangeForced,
         setIsPasswordChangeForced,
         questions: visibleQuestions,
+        packets,
         categories: visibleCategories,
         auditLogs,
         notifications,
@@ -1439,6 +2086,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         recallQuestion,
         duplicateQuestion,
         deleteQuestion,
+        bulkDeleteQuestions,
+        createPacket,
+        updatePacket,
+        deletePacket,
+        addQuestionsToPacket,
+        removeQuestionFromPacket,
         submitReview,
         addCategory,
         updateCategory,
@@ -1457,6 +2110,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         lastGasSyncTime,
         syncWithGoogleSheets,
         pullFromGoogleSheets,
+        dualSyncStatus,
+        isDualSyncing,
+        lastDualSyncTime,
+        dualSyncDatabases,
         isSidebarMinimized,
         setIsSidebarMinimized,
         toggleSidebarMinimized,

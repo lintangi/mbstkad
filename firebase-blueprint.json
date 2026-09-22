@@ -1,0 +1,134 @@
+{
+  "entities": {
+    "Question": {
+      "title": "Question",
+      "description": "Item bank soal dalam sistem TKAD Adiwerna",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "code": { "type": "string", "maxLength": 64 },
+        "type": { "type": "string", "enum": ["pilihan_ganda", "pilihan_ganda_kompleks", "benar_salah", "menjodohkan", "isian_singkat", "esai"] },
+        "status": { "type": "string", "enum": ["draft", "menunggu_review", "disetujui", "perlu_revisi", "ditolak"] },
+        "subtest": { "type": "string", "maxLength": 128 },
+        "topic": { "type": "string", "maxLength": 128 },
+        "difficulty": { "type": "string", "enum": ["mudah", "sedang", "sulit"] },
+        "tags": { "type": "array" },
+        "defaultScore": { "type": "number" },
+        "prompt": { "type": "string" },
+        "explanation": { "type": "string" },
+        "attachments": { "type": "array" },
+        "options": { "type": "array" },
+        "matchingPairs": { "type": "array" },
+        "trueFalseItems": { "type": "array" },
+        "shortAnswerKey": { "type": "string" },
+        "essayRubric": { "type": "string" },
+        "createdById": { "type": "string", "maxLength": 128 },
+        "createdByName": { "type": "string", "maxLength": 128 },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" },
+        "version": { "type": "string", "maxLength": 32 },
+        "reviews": { "type": "array" },
+        "versions": { "type": "array" }
+      },
+      "required": ["id", "code", "type", "status", "subtest", "topic", "difficulty", "prompt", "createdById", "createdByName", "createdAt", "updatedAt"]
+    },
+    "User": {
+      "title": "User",
+      "description": "Pengguna aplikasi bank soal",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "name": { "type": "string", "maxLength": 128 },
+        "email": { "type": "string", "maxLength": 128 },
+        "role": { "type": "string", "enum": ["pembuat", "reviewer", "admin"] },
+        "avatar": { "type": "string", "maxLength": 16 },
+        "department": { "type": "string", "maxLength": 128 },
+        "status": { "type": "string", "enum": ["aktif", "nonaktif"] },
+        "password": { "type": "string", "maxLength": 128 },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "name", "email", "role"]
+    },
+    "AuditLog": {
+      "title": "AuditLog",
+      "description": "Catatan log riwayat aktivitas sistem",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "timestamp": { "type": "string" },
+        "userId": { "type": "string", "maxLength": 128 },
+        "userName": { "type": "string", "maxLength": 128 },
+        "userRole": { "type": "string", "enum": ["pembuat", "reviewer", "admin"] },
+        "action": { "type": "string", "maxLength": 64 },
+        "description": { "type": "string", "maxLength": 500 }
+      },
+      "required": ["id", "timestamp", "userId", "userName", "userRole", "action", "description"]
+    },
+    "AppNotification": {
+      "title": "AppNotification",
+      "description": "Notifikasi untuk pengguna",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "timestamp": { "type": "string" },
+        "userId": { "type": "string", "maxLength": 128 },
+        "title": { "type": "string", "maxLength": 128 },
+        "message": { "type": "string", "maxLength": 500 },
+        "type": { "type": "string", "enum": ["info", "success", "warning", "error"] },
+        "read": { "type": "boolean" }
+      },
+      "required": ["id", "timestamp", "userId", "title", "message", "type", "read"]
+    },
+    "CategoryMetadata": {
+      "title": "CategoryMetadata",
+      "description": "Kategori mata pelajaran",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "name": { "type": "string", "maxLength": 128 },
+        "description": { "type": "string", "maxLength": 500 },
+        "topics": { "type": "array" }
+      },
+      "required": ["id", "name", "description"]
+    },
+    "AppSetting": {
+      "title": "AppSetting",
+      "description": "Pengaturan sistem dan konfigurasi",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "gasWebhookUrl": { "type": "string" },
+        "gasSpreadsheetId": { "type": "string" },
+        "gasAutoSync": { "type": "boolean" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["id"]
+    }
+  },
+  "firestore": {
+    "/questions/{questionId}": {
+      "schema": { "$ref": "#/entities/Question" },
+      "description": "Koleksi bank soal"
+    },
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/User" },
+      "description": "Koleksi akun pengguna"
+    },
+    "/audit_logs/{logId}": {
+      "schema": { "$ref": "#/entities/AuditLog" },
+      "description": "Koleksi log audit sistem"
+    },
+    "/notifications/{notificationId}": {
+      "schema": { "$ref": "#/entities/AppNotification" },
+      "description": "Koleksi notifikasi pengguna"
+    },
+    "/categories/{categoryId}": {
+      "schema": { "$ref": "#/entities/CategoryMetadata" },
+      "description": "Koleksi metadata kategori"
+    },
+    "/settings/{settingId}": {
+      "schema": { "$ref": "#/entities/AppSetting" },
+      "description": "Koleksi konfigurasi sistem"
+    }
+  }
+}

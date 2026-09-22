@@ -72,7 +72,10 @@ export const QuestionEditor: React.FC = () => {
   const [subtest, setSubtest] = useState(
     editingQuestion?.subtest || userDeptCategory || availableSubtests[0] || 'Bahasa Indonesia'
   );
-  const [topic, setTopic] = useState(editingQuestion?.topic || 'Materi Pokok');
+  const [element, setElement] = useState(editingQuestion?.element || editingQuestion?.topic || 'Materi Pokok');
+  const [subElement, setSubElement] = useState(editingQuestion?.subElement || '');
+  const [competency, setCompetency] = useState(editingQuestion?.competency || '');
+  const [cognitiveLevel, setCognitiveLevel] = useState(editingQuestion?.cognitiveLevel || 'C2 - Memahami');
   const [difficulty, setDifficulty] = useState<DifficultyLevel>(editingQuestion?.difficulty || 'sedang');
   const [defaultScore, setDefaultScore] = useState<number>(editingQuestion?.defaultScore || 4);
   const [tagInput, setTagInput] = useState((editingQuestion?.tags || []).join(', '));
@@ -273,7 +276,11 @@ export const QuestionEditor: React.FC = () => {
       code: code.trim() || undefined,
       type,
       subtest,
-      topic: topic.trim() || 'Umum',
+      element: element.trim() || 'Umum',
+      subElement: subElement.trim() || undefined,
+      competency: competency.trim() || undefined,
+      cognitiveLevel: cognitiveLevel || undefined,
+      topic: element.trim() || 'Umum',
       difficulty,
       defaultScore: Number(defaultScore) || 4,
       tags,
@@ -408,7 +415,7 @@ export const QuestionEditor: React.FC = () => {
                   setSubtest(newSub);
                   const matched = categories.find((c) => c.name === newSub);
                   if (matched && matched.topics.length > 0) {
-                    setTopic(matched.topics[0]);
+                    setElement(matched.topics[0]);
                   }
                 }}
                 className={`w-full text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-3 py-2 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 ${
@@ -428,37 +435,37 @@ export const QuestionEditor: React.FC = () => {
               )}
             </div>
 
-            {/* Topic / Bahasan */}
+            {/* 1. Elemen (sebelumnya Topik/Bahasan) */}
             <div>
               <div className="flex items-center justify-between mb-1">
                 <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
-                  Topik / Bahasan (Input Manual) *
+                  1. Elemen (Capaian / Materi Pokok) *
                 </label>
                 <span className="text-[10px] text-blue-600 dark:text-blue-400">Bebas ketik</span>
               </div>
               <input
                 type="text"
                 disabled={!editPermission.allowed}
-                value={topic}
-                onChange={(e) => setTopic(e.target.value)}
-                placeholder="Ketik topik materi secara manual..."
-                className="w-full text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-3 py-2 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                value={element}
+                onChange={(e) => setElement(e.target.value)}
+                placeholder="Ketik nama elemen / capaian..."
+                className="w-full text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-3 py-2 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 font-medium"
               />
 
               {/* Suggestion Chips */}
               {suggestedTopics.length > 0 && editPermission.allowed && (
                 <div className="mt-2">
                   <span className="text-[10px] text-slate-400 dark:text-slate-500 block mb-1">
-                    Saran topik untuk {subtest}:
+                    Saran elemen untuk {subtest}:
                   </span>
                   <div className="flex flex-wrap gap-1">
                     {suggestedTopics.map((sug) => (
                       <button
                         key={sug}
                         type="button"
-                        onClick={() => setTopic(sug)}
+                        onClick={() => setElement(sug)}
                         className={`text-[10px] px-2 py-0.5 rounded-md border transition cursor-pointer ${
-                          topic === sug
+                          element === sug
                             ? 'bg-blue-100 dark:bg-blue-900/60 border-blue-300 dark:border-blue-700 text-blue-800 dark:text-blue-200 font-semibold'
                             : 'bg-slate-100/70 dark:bg-slate-800/60 border-slate-200 dark:border-slate-700/60 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'
                         }`}
@@ -469,6 +476,56 @@ export const QuestionEditor: React.FC = () => {
                   </div>
                 </div>
               )}
+            </div>
+
+            {/* 2. Sub Elemen */}
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                2. Sub Elemen
+              </label>
+              <input
+                type="text"
+                disabled={!editPermission.allowed}
+                value={subElement}
+                onChange={(e) => setSubElement(e.target.value)}
+                placeholder="Ketik rincian sub-elemen / materi spesifik..."
+                className="w-full text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-3 py-2 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+
+            {/* 3. Kompetensi (Indikator Soal) */}
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                3. Kompetensi (Indikator Soal)
+              </label>
+              <textarea
+                rows={2}
+                disabled={!editPermission.allowed}
+                value={competency}
+                onChange={(e) => setCompetency(e.target.value)}
+                placeholder="Disajikan data/teks..., peserta didik mampu..."
+                className="w-full text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 p-2.5 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 leading-relaxed"
+              />
+            </div>
+
+            {/* 4. Level Kognitif (Dropdown Taksonomi Bloom) */}
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                4. Level Kognitif (Taksonomi Bloom) *
+              </label>
+              <select
+                value={cognitiveLevel}
+                disabled={!editPermission.allowed}
+                onChange={(e) => setCognitiveLevel(e.target.value)}
+                className="w-full text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-3 py-2 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 font-medium"
+              >
+                <option value="C1 - Mengingat">C1 - Mengingat (Remembering: menyebutkan, mengenali, mendefinisikan)</option>
+                <option value="C2 - Memahami">C2 - Memahami (Understanding: menjelaskan, menginterpretasi, mengelompokkan)</option>
+                <option value="C3 - Menerapkan">C3 - Menerapkan (Applying: menghitung, menerapkan rumus, mendemonstrasikan)</option>
+                <option value="C4 - Menganalisis">C4 - Menganalisis (Analyzing: membedakan, mengorganisasi, menguraikan masalah)</option>
+                <option value="C5 - Mengevaluasi">C5 - Mengevaluasi (Evaluating: menilai, mengkritisi, menyimpulkan validitas)</option>
+                <option value="C6 - Berkreasi / Mencipta">C6 - Berkreasi / Mencipta (Creating: merancang, menyusun konsep baru)</option>
+              </select>
             </div>
 
             {/* Question Type */}

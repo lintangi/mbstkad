@@ -202,51 +202,6 @@ export const LoginView: React.FC = () => {
                   )}
                 </button>
               </form>
-
-              {/* Quick Select Default Accounts (Email only, no auto password) */}
-              <div className="pt-2 border-t border-slate-100 dark:border-slate-800/80">
-                <div className="flex items-center justify-between mb-2">
-                  <span className="text-[11px] font-semibold text-slate-600 dark:text-slate-300">
-                    Pilih Akun Pengguna:
-                  </span>
-                  <span className="text-[10px] text-slate-400">Klik untuk isi email otomatis</span>
-                </div>
-                <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
-                  {[
-                    { name: 'Estri Dhina Kristiani, S.S.', role: 'Admin', sub: 'Pusat Bank Soal', em: 'dhina@tkad.adiwerna', color: 'border-purple-200 dark:border-purple-800/60 bg-purple-50/50 dark:bg-purple-950/30 text-purple-700 dark:text-purple-300' },
-                    { name: 'Lilis Nuryanti, M.Pd.', role: 'Reviewer', sub: 'IPAS', em: 'lilisnuryanti@tkad.adiwerna', color: 'border-emerald-200 dark:border-emerald-800/60 bg-emerald-50/50 dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-300' },
-                    { name: 'Rifal Fauzi, S.Pd.', role: 'Reviewer', sub: 'Bahasa Indonesia', em: 'rifal@tkad.adiwerna', color: 'border-emerald-200 dark:border-emerald-800/60 bg-emerald-50/50 dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-300' },
-                    { name: 'Nur Aripiyah, S.Pd.', role: 'Reviewer', sub: 'Matematika', em: 'nuraripiyah@tkad.adiwerna', color: 'border-emerald-200 dark:border-emerald-800/60 bg-emerald-50/50 dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-300' },
-                    { name: 'Mohamad Wildan Pramadika, S.Pd.', role: 'Pembuat', sub: 'Matematika', em: 'wildan@tkad.adiwerna', color: 'border-blue-200 dark:border-blue-800/60 bg-blue-50/50 dark:bg-blue-950/30 text-blue-700 dark:text-blue-300' },
-                    { name: 'Moh Uwais Koroni, S.Pd.', role: 'Pembuat', sub: 'Bahasa Indonesia', em: 'uwais@tkad.adiwerna', color: 'border-blue-200 dark:border-blue-800/60 bg-blue-50/50 dark:bg-blue-950/30 text-blue-700 dark:text-blue-300' },
-                    { name: 'Dewi Puspitasari, S.Pd.', role: 'Pembuat', sub: 'IPAS', em: 'dewi@tkad.adiwerna', color: 'border-blue-200 dark:border-blue-800/60 bg-blue-50/50 dark:bg-blue-950/30 text-blue-700 dark:text-blue-300' },
-                    { name: 'Yusril Yahya Muhaimin, M.Pd.', role: 'Admin', sub: 'Super Administrator', em: 'haloyusril@tkad.adiwerna', color: 'border-purple-200 dark:border-purple-800 bg-slate-50 dark:bg-purple-800/50 text-purple-700 dark:text-purple-300' },
-                  ].map((acc) => (
-                    <button
-                      key={acc.em}
-                      type="button"
-                      onClick={() => {
-                        setEmail(acc.em);
-                        setPassword('');
-                        setErrorMsg('');
-                      }}
-                      className="w-full text-left p-2 rounded-xl border border-slate-200 dark:border-slate-800 hover:border-blue-300 dark:hover:border-blue-700 bg-slate-50/60 dark:bg-slate-800/40 hover:bg-blue-50/40 dark:hover:bg-blue-950/30 transition flex items-center justify-between group cursor-pointer"
-                    >
-                      <div className="min-w-0 pr-2">
-                        <div className="text-xs font-semibold text-slate-900 dark:text-white truncate">
-                          {acc.name}
-                        </div>
-                        <div className="text-[10px] text-slate-500 dark:text-slate-400 truncate">
-                          {acc.em} • {acc.sub}
-                        </div>
-                      </div>
-                      <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded border shrink-0 ${acc.color}`}>
-                        {acc.role}
-                      </span>
-                    </button>
-                  ))}
-                </div>
-              </div>
             </div>
           </div>
         </div>
