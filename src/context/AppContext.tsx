@@ -617,47 +617,37 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       (snapshot) => {
         const list: User[] = [];
         if (!snapshot.empty) {
-          snapshot.forEach((d) => list.push(d.data() as User));
+          snapshot.forEach((d) => {
+            const userData = d.data() as User;
+            // Ensure roles field is populated if missing
+            if (!userData.roles || userData.roles.length === 0) {
+              userData.roles = [userData.role || 'pembuat'];
+            }
+            list.push(userData);
+          });
         }
 
-        // Self-healing migration to enforce root@tkad.adiwerna with tkadw2026# as the ONLY admin, removing all other users
-        const hasNonRoot = list.some(u => u.email.toLowerCase() !== 'root@tkad.adiwerna');
         const hasRoot = list.some(u => u.email.toLowerCase() === 'root@tkad.adiwerna');
 
-        if (hasNonRoot || !hasRoot) {
-          console.log("Cleaning up users database... keeping/creating only root admin.");
-          // Delete all non-root users
-          snapshot.forEach(async (d) => {
-            const u = d.data() as User;
-            if (u.email.toLowerCase() !== 'root@tkad.adiwerna') {
-              try {
-                await deleteDoc(doc(db, 'users', d.id));
-              } catch (err) {
-                console.warn('Failed deleting legacy user from Firestore:', err);
-              }
-            }
-          });
-
-          // Ensure root admin exists
-          if (!hasRoot) {
-            const rootUser: User = {
-              id: 'usr-admin-root',
-              name: 'Root Administrator',
-              email: 'root@tkad.adiwerna',
-              role: 'admin',
-              roles: ['admin'],
-              avatar: 'RT',
-              password: 'tkadw2026#',
-              isDefaultPassword: false,
-              status: 'aktif',
-              createdAt: new Date().toISOString()
-            };
-            setDoc(doc(db, 'users', rootUser.id), sanitizeForFirestore(rootUser))
-              .then(() => {
-                setUsers([rootUser]);
-              })
-              .catch(err => console.error("Failed seeding root administrator:", err));
-          }
+        if (!hasRoot) {
+          console.log("Root administrator not found, seeding...");
+          const rootUser: User = {
+            id: 'usr-admin-root',
+            name: 'Root Administrator',
+            email: 'root@tkad.adiwerna',
+            role: 'admin',
+            roles: ['admin'],
+            avatar: 'RT',
+            password: 'tkadw2026#',
+            isDefaultPassword: false,
+            status: 'aktif',
+            createdAt: new Date().toISOString()
+          };
+          setDoc(doc(db, 'users', rootUser.id), sanitizeForFirestore(rootUser))
+            .then(() => {
+              // The next snapshot trigger will update the state with the newly created root user
+            })
+            .catch(err => console.error("Failed seeding root administrator:", err));
         } else {
           setUsers(list);
         }
@@ -1142,6 +1132,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             ...existing,
             name: row.name,
             role: row.role,
+            roles: existing.roles && existing.roles.includes(row.role) ? existing.roles : [row.role, ...(existing.roles || [])],
             department: row.department,
             status: row.status,
             password: row.password || existing.password || 'password123',
@@ -1157,6 +1148,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           name: row.name,
           email: row.email,
           role: row.role,
+          roles: [row.role],
           department: row.department,
           status: row.status,
           password: row.password || 'password123',
