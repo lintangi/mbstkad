@@ -892,6 +892,28 @@ export async function exportQuestionsToWord(
       })
     );
 
+    // Render attachments info if available
+    if (q.attachments && q.attachments.length > 0) {
+      q.attachments.forEach((att) => {
+        docChildren.push(
+          new Paragraph({
+            spacing: { before: 30, after: 40 },
+            indent: { left: convertInchesToTwip(0.4) },
+            children: [
+              new TextRun({
+                text: `[Lampiran Gambar/Media: ${att.name}${att.size ? ` - ${att.size}` : ''}]`,
+                italics: true,
+                bold: true,
+                size: 19,
+                font: 'Calibri',
+                color: '1D4ED8',
+              }),
+            ],
+          })
+        );
+      });
+    }
+
     // Options for Pilihan Ganda & Pilihan Ganda Kompleks
     if (q.options && q.options.length > 0) {
       q.options.forEach((opt) => {

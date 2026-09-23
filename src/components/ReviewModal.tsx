@@ -103,10 +103,32 @@ export const ReviewModal: React.FC = () => {
             <div className="text-sm text-slate-900 dark:text-slate-100 leading-relaxed font-sans bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800">
               <LatexRenderer content={question.prompt} />
               {question.attachments.length > 0 && (
-                <div className="mt-3 grid grid-cols-2 gap-2">
-                  {question.attachments.map((att) => (
-                    <img key={att.id} src={att.url} alt={att.name} className="max-h-40 rounded border border-slate-200 dark:border-slate-700 mx-auto" />
-                  ))}
+                <div className="mt-4 space-y-4">
+                  {question.attachments.map((att) => {
+                    const alignClass = 
+                      att.align === 'left' ? 'text-left' :
+                      att.align === 'right' ? 'text-right' :
+                      'text-center';
+
+                    const alignImgClass = 
+                      att.align === 'left' ? 'mr-auto ml-0' :
+                      att.align === 'right' ? 'ml-auto mr-0' :
+                      'mx-auto';
+
+                    const widthStyle = att.width ? `${att.width}%` : '100%';
+
+                    return (
+                      <div key={att.id} className={alignClass}>
+                        <img
+                          src={att.url}
+                          alt={att.name}
+                          style={{ width: widthStyle }}
+                          className={`max-h-72 object-contain rounded border border-slate-200 dark:border-slate-700 ${alignImgClass}`}
+                        />
+                        <span className="text-[10px] text-slate-400 mt-1 block italic">{att.name}</span>
+                      </div>
+                    );
+                  })}
                 </div>
               )}
             </div>

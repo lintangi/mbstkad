@@ -85,6 +85,8 @@ export interface QuestionAttachment {
   type: 'image' | 'audio' | 'document';
   url: string;
   size?: string;
+  width?: number; // percentage (e.g. 50, 75, 100)
+  align?: 'left' | 'center' | 'right';
 }
 
 export interface Question {
@@ -182,7 +184,9 @@ export interface AuditLog {
     | 'DELETE_USER'
     | 'IMPORT_USERS'
     | 'DUAL_SYNC'
-    | 'SYNC_GAS';
+    | 'SYNC_GAS'
+    | 'RESTORE_DATABASE'
+    | 'ROLLBACK';
   questionId?: string;
   questionCode?: string;
   description: string;
@@ -191,6 +195,15 @@ export interface AuditLog {
     oldValue?: string;
     newValue?: string;
   };
+  snapshot?: {
+    targetType: 'question' | 'user' | 'packet' | 'category' | 'bulk_questions' | 'system_database';
+    targetId?: string;
+    previousData?: any;
+    newData?: any;
+  };
+  rolledBack?: boolean;
+  rolledBackAt?: string;
+  rolledBackBy?: string;
 }
 
 export interface AppNotification {

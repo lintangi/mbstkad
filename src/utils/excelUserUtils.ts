@@ -5,6 +5,7 @@ export interface ParsedUserRow {
   name: string;
   email: string;
   role: UserRole;
+  roles?: UserRole[];
   department: string;
   password?: string;
   status: 'aktif' | 'nonaktif';
@@ -209,16 +210,16 @@ export async function parseUserExcelFile(file: File): Promise<ParseExcelResult> 
           }
           seenEmails.add(rawEmail);
 
-          let role: UserRole = 'pembuat';
-          if (rawRole.includes('admin')) {
-            role = 'admin';
-          } else if (rawRole.includes('review')) {
-            role = 'reviewer';
-          } else if (rawRole.includes('pembuat') || rawRole.includes('penyusun') || rawRole.includes('guru') || rawRole.includes('creator')) {
-            role = 'pembuat';
-          } else {
-            role = 'pembuat';
+          const parsedRoles: UserRole[] = [];
+          if (rawRole.includes('admin')) parsedRoles.push('admin');
+          if (rawRole.includes('review') || rawRole.includes('penelaah')) parsedRoles.push('reviewer');
+          if (rawRole.includes('pembuat') || rawRole.includes('penyusun') || rawRole.includes('guru') || rawRole.includes('creator')) {
+            if (!parsedRoles.includes('pembuat')) parsedRoles.push('pembuat');
           }
+          if (parsedRoles.length === 0) {
+            parsedRoles.push('pembuat');
+          }
+          const primaryRole: UserRole = parsedRoles[0];
 
           let status: 'aktif' | 'nonaktif' = 'aktif';
           if (rawStatus.includes('non') || rawStatus.includes('inaktif') || rawStatus.includes('false')) {
@@ -228,7 +229,8 @@ export async function parseUserExcelFile(file: File): Promise<ParseExcelResult> 
           validUsers.push({
             name: rawName,
             email: rawEmail,
-            role,
+            role: primaryRole,
+            roles: parsedRoles,
             department: rawDept || 'Unit Akademik TKAD',
             password: rawPass || 'password123',
             status,

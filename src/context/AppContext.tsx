@@ -30,6 +30,7 @@ import {
 } from 'firebase/firestore';
 import { db, testFirestoreConnection, handleFirestoreError, OperationType, sanitizeForFirestore } from '../lib/firebase';
 import { ParsedUserRow } from '../utils/excelUserUtils';
+import { generateJSONDatabase, validateAndParseJSONDatabase } from '../utils/databaseUtils';
 
 interface AppContextType {
   // Auth & Current User
@@ -45,6 +46,7 @@ interface AppContextType {
 
   // Users CRUD & Excel Import/Export
   users: User[];
+  setUsers: React.Dispatch<React.SetStateAction<User[]>>;
   addUser: (data: Omit<User, 'id'>) => { success: boolean; message: string; user?: User };
   updateUser: (id: string, data: Partial<User>) => void;
   deleteUser: (id: string) => { success: boolean; message: string };
@@ -57,9 +59,13 @@ interface AppContextType {
 
   // Data Collections
   questions: Question[];
+  setQuestions: React.Dispatch<React.SetStateAction<Question[]>>;
   packets: QuestionPacket[];
+  setPackets: React.Dispatch<React.SetStateAction<QuestionPacket[]>>;
   categories: CategoryMetadata[];
+  setCategories: React.Dispatch<React.SetStateAction<CategoryMetadata[]>>;
   auditLogs: AuditLog[];
+  setAuditLogs: React.Dispatch<React.SetStateAction<AuditLog[]>>;
   notifications: AppNotification[];
 
   // Navigation & Role Menus
@@ -115,6 +121,28 @@ interface AppContextType {
   addCategory: (cat: CategoryMetadata) => void;
   updateCategory: (id: string, cat: Partial<CategoryMetadata>) => void;
   deleteCategory: (id: string) => void;
+
+  // Audit Log & Rollback Actions
+  logAudit: (
+    action: string,
+    questionId?: string,
+    questionCode?: string,
+    description?: string,
+    details?: any,
+    snapshot?: any
+  ) => void;
+  rollbackAuditLog: (logId: string) => Promise<{ success: boolean; message: string }>;
+
+  // Full Database Backup & Restore
+  exportFullSystemBackup: () => { success: boolean; message: string };
+  restoreFullSystemBackup: (
+    jsonContent: string,
+    mode?: 'replace' | 'merge'
+  ) => Promise<{
+    success: boolean;
+    message: string;
+    counts: { questions: number; users: number; packets: number; categories: number };
+  }>;
 
   // Notification Actions
   markNotificationRead: (id: string) => void;
@@ -891,7 +919,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     description: string,
     questionId?: string,
     questionCode?: string,
-    details?: AuditLog['details']
+    details?: AuditLog['details'],
+    snapshot?: AuditLog['snapshot']
   ) => {
     const newLog: AuditLog = {
       id: `log-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
@@ -904,9 +933,28 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       ...(questionCode ? { questionCode } : {}),
       description,
       ...(details ? { details } : {}),
+      ...(snapshot ? { snapshot } : {}),
     };
     setAuditLogs((prev) => [newLog, ...prev]);
     syncLogToFirestore(newLog);
+  };
+
+  const logAudit = (
+    action: string,
+    questionId?: string,
+    questionCode?: string,
+    description?: string,
+    details?: any,
+    snapshot?: any
+  ) => {
+    addAuditLog(
+      (action as AuditLog['action']) || 'CONFIG_CHANGE',
+      description || `Aktivitas sistem: ${action}`,
+      questionId,
+      questionCode,
+      details,
+      snapshot
+    );
   };
 
   const addNotification = (
@@ -1063,15 +1111,28 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     setUsers((prev) => [...prev, newUser]);
     syncUserToFirestore(newUser);
-    addAuditLog('CREATE_USER', `Menambahkan pengguna baru ${newUser.name} (${newUser.email}) role: ${newUser.role}`);
+    addAuditLog(
+      'CREATE_USER',
+      `Menambahkan pengguna baru ${newUser.name} (${newUser.email}) role: ${newUser.role}`,
+      undefined,
+      undefined,
+      undefined,
+      {
+        targetType: 'user',
+        targetId: newId,
+        newData: newUser,
+      }
+    );
     return { success: true, message: `Pengguna ${newUser.name} berhasil ditambahkan!`, user: newUser };
   };
 
   const updateUser = (id: string, data: Partial<User>) => {
     let updatedUserObj: User | null = null;
+    let oldUserObj: User | null = null;
     setUsers((prev) =>
       prev.map((u) => {
         if (u.id !== id) return u;
+        oldUserObj = u;
         const updated = { ...u, ...data };
         updatedUserObj = updated;
         if (currentUser.id === id) {
@@ -1083,7 +1144,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (updatedUserObj) {
       syncUserToFirestore(updatedUserObj);
     }
-    addAuditLog('UPDATE_USER', `Administrator memperbarui data pengguna ID: ${id}`);
+    addAuditLog(
+      'UPDATE_USER',
+      `Administrator memperbarui data pengguna ID: ${id}`,
+      undefined,
+      undefined,
+      undefined,
+      {
+        targetType: 'user',
+        targetId: id,
+        previousData: oldUserObj,
+        newData: updatedUserObj,
+      }
+    );
   };
 
   const deleteUser = (id: string): { success: boolean; message: string } => {
@@ -1101,7 +1174,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     setUsers((prev) => prev.filter((u) => u.id !== id));
     removeUserFromFirestore(id);
-    addAuditLog('DELETE_USER', `Menghapus pengguna ${targetUser.name} (${targetUser.email})`);
+    addAuditLog(
+      'DELETE_USER',
+      `Menghapus pengguna ${targetUser.name} (${targetUser.email})`,
+      undefined,
+      undefined,
+      undefined,
+      {
+        targetType: 'user',
+        targetId: id,
+        previousData: targetUser,
+      }
+    );
     return { success: true, message: `Pengguna ${targetUser.name} berhasil dihapus dari sistem.` };
   };
 
@@ -1128,11 +1212,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       if (existingIndex >= 0) {
         if (replaceExisting) {
           const existing = updatedUserList[existingIndex];
+          const newRoles = row.roles && row.roles.length > 0 
+            ? row.roles 
+            : (existing.roles && existing.roles.includes(row.role) ? existing.roles : [row.role, ...(existing.roles || [])]);
           const updated: User = {
             ...existing,
             name: row.name,
             role: row.role,
-            roles: existing.roles && existing.roles.includes(row.role) ? existing.roles : [row.role, ...(existing.roles || [])],
+            roles: newRoles,
             department: row.department,
             status: row.status,
             password: row.password || existing.password || 'password123',
@@ -1148,7 +1235,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           name: row.name,
           email: row.email,
           role: row.role,
-          roles: [row.role],
+          roles: row.roles && row.roles.length > 0 ? row.roles : [row.role],
           department: row.department,
           status: row.status,
           password: row.password || 'password123',
@@ -1223,7 +1310,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         ? `Membuat soal baru ${code} (${newQuestion.subtest}) dan langsung mengajukan untuk review`
         : `Menyimpan draf soal baru ${code} (${newQuestion.subtest})`,
       newId,
-      code
+      code,
+      undefined,
+      {
+        targetType: 'question',
+        targetId: newId,
+        newData: newQuestion,
+      }
     );
 
     if (submitDirectly) {
@@ -1243,9 +1336,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const updateQuestion = (id: string, data: Partial<Question>, submitForReview: boolean) => {
     let updatedQ: Question | null = null;
+    let oldQ: Question | null = null;
     setQuestions((prev) =>
       prev.map((q) => {
         if (q.id !== id) return q;
+        oldQ = q;
 
         const isApproved = q.status === 'disetujui';
         let nextVersion = q.version;
@@ -1287,37 +1382,42 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
         updatedQ = updated;
 
-        addAuditLog(
-          submitForReview ? 'SUBMIT_REVIEW' : 'UPDATE_QUESTION',
-          submitForReview
-            ? `Mengirimkan revisi soal ${q.code} ke antrian review (v${nextVersion})`
-            : `Memperbarui konten soal ${q.code} (v${nextVersion})`,
-          q.id,
-          q.code,
-          {
-            field: 'status',
-            oldValue: q.status,
-            newValue: newStatus,
-          }
-        );
-
-        if (submitForReview) {
-          const reviewer = users.find((u) => u.role === 'reviewer');
-          addNotification(
-            reviewer ? reviewer.id : 'usr-2',
-            'Pengajuan Ulang / Soal Siap Direview',
-            `${currentUser.name} memperbarui soal ${q.code} dan mengajukannya untuk review.`,
-            'info',
-            q.id
-          );
-        }
-
         return updated;
       })
     );
 
-    if (updatedQ) {
+    if (updatedQ && oldQ) {
       syncQuestionToFirestore(updatedQ);
+      addAuditLog(
+        submitForReview ? 'SUBMIT_REVIEW' : 'UPDATE_QUESTION',
+        submitForReview
+          ? `Mengirimkan revisi soal ${(oldQ as Question).code} ke antrian review (v${(updatedQ as Question).version})`
+          : `Memperbarui konten soal ${(oldQ as Question).code} (v${(updatedQ as Question).version})`,
+        id,
+        (oldQ as Question).code,
+        {
+          field: 'status',
+          oldValue: (oldQ as Question).status,
+          newValue: (updatedQ as Question).status,
+        },
+        {
+          targetType: 'question',
+          targetId: id,
+          previousData: oldQ,
+          newData: updatedQ,
+        }
+      );
+    }
+
+    if (submitForReview) {
+      const reviewer = users.find((u) => u.role === 'reviewer');
+      addNotification(
+        reviewer ? reviewer.id : 'usr-2',
+        'Pengajuan Ulang / Soal Siap Direview',
+        `${currentUser.name} memperbarui soal ${id} dan mengajukannya untuk review.`,
+        'info',
+        id
+      );
     }
   };
 
@@ -1336,11 +1436,23 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     );
     syncQuestionToFirestore(updated);
 
-    addAuditLog('RECALL', `Menarik kembali soal ${q.code} dari antrian review menjadi draf`, q.id, q.code, {
-      field: 'status',
-      oldValue: 'menunggu_review',
-      newValue: 'draft',
-    });
+    addAuditLog(
+      'RECALL',
+      `Menarik kembali soal ${q.code} dari antrian review menjadi draf`,
+      q.id,
+      q.code,
+      {
+        field: 'status',
+        oldValue: 'menunggu_review',
+        newValue: 'draft',
+      },
+      {
+        targetType: 'question',
+        targetId: q.id,
+        previousData: q,
+        newData: updated,
+      }
+    );
 
     const reviewer = users.find((u) => u.role === 'reviewer');
     addNotification(
@@ -1386,7 +1498,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     setQuestions((prev) => [cloned, ...prev]);
     syncQuestionToFirestore(cloned);
-    addAuditLog('DUPLICATE', `Menduplikasi soal ${original.code} menjadi variasi baru ${newCode}`, newId, newCode);
+    addAuditLog(
+      'DUPLICATE',
+      `Menduplikasi soal ${original.code} menjadi variasi baru ${newCode}`,
+      newId,
+      newCode,
+      undefined,
+      {
+        targetType: 'question',
+        targetId: newId,
+        previousData: original,
+        newData: cloned,
+      }
+    );
   };
 
   const deleteQuestion = (id: string) => {
@@ -1396,19 +1520,41 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setQuestions((prev) => prev.filter((item) => item.id !== id));
     setDeletedQuestionIds((prev) => Array.from(new Set([...prev, id])));
     removeQuestionFromFirestore(id);
-    addAuditLog('UPDATE_QUESTION', `Menghapus butir soal ${q.code} (Status diubah menjadi TIDAK_AKTIF di basis data Spreadsheet)`, q.id, q.code);
+    addAuditLog(
+      'UPDATE_QUESTION',
+      `Menghapus butir soal ${q.code}`,
+      q.id,
+      q.code,
+      undefined,
+      {
+        targetType: 'question',
+        targetId: q.id,
+        previousData: q,
+      }
+    );
   };
 
   const bulkDeleteQuestions = (ids: string[]): { count: number } => {
     if (!ids.length) return { count: 0 };
     const idSet = new Set(ids);
-    const deletedCount = questions.filter((q) => idSet.has(q.id)).length;
+    const deletedQuestionsList = questions.filter((q) => idSet.has(q.id));
+    const deletedCount = deletedQuestionsList.length;
 
     setQuestions((prev) => prev.filter((q) => !idSet.has(q.id)));
     setDeletedQuestionIds((prev) => Array.from(new Set([...prev, ...ids])));
     ids.forEach((id) => removeQuestionFromFirestore(id));
 
-    addAuditLog('UPDATE_QUESTION', `Menghapus massal ${deletedCount} butir soal dari Bank Soal.`);
+    addAuditLog(
+      'BULK_DELETE_QUESTIONS',
+      `Menghapus massal ${deletedCount} butir soal dari Bank Soal.`,
+      undefined,
+      undefined,
+      undefined,
+      {
+        targetType: 'bulk_questions',
+        previousData: deletedQuestionsList,
+      }
+    );
     return { count: deletedCount };
   };
 
@@ -1477,15 +1623,28 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       );
     }
 
-    addAuditLog('CREATE_QUESTION', `Membuat paket soal baru: "${newPacket.title}" (${newPacket.code}) berisi ${newPacket.totalQuestions} butir soal.`);
+    addAuditLog(
+      'CREATE_PACKET',
+      `Membuat paket soal baru: "${newPacket.title}" (${newPacket.code}) berisi ${newPacket.totalQuestions} butir soal.`,
+      undefined,
+      undefined,
+      undefined,
+      {
+        targetType: 'packet',
+        targetId: newPacket.id,
+        newData: newPacket,
+      }
+    );
     return newPacket;
   };
 
   const updatePacket = (id: string, data: Partial<QuestionPacket>) => {
     let updatedPacket: QuestionPacket | null = null;
+    let oldPacket: QuestionPacket | null = null;
     setPackets((prev) =>
       prev.map((p) => {
         if (p.id !== id) return p;
+        oldPacket = p;
         const total = data.questionIds !== undefined ? data.questionIds.length : p.totalQuestions;
         const updated = { ...p, ...data, totalQuestions: total, updatedAt: new Date().toISOString() };
         updatedPacket = updated;
@@ -1493,10 +1652,22 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       })
     );
 
-    if (updatedPacket) {
+    if (updatedPacket && oldPacket) {
       syncPacketToFirestore(updatedPacket);
+      addAuditLog(
+        'UPDATE_PACKET',
+        `Memperbarui data paket soal "${(oldPacket as QuestionPacket).title}" (${(oldPacket as QuestionPacket).code})`,
+        undefined,
+        undefined,
+        undefined,
+        {
+          targetType: 'packet',
+          targetId: id,
+          previousData: oldPacket,
+          newData: updatedPacket,
+        }
+      );
     }
-    addAuditLog('UPDATE_QUESTION', `Memperbarui data paket soal ID: ${id}`);
   };
 
   const deletePacket = (id: string) => {
@@ -1504,7 +1675,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setPackets((prev) => prev.filter((p) => p.id !== id));
     removePacketFromFirestore(id);
     if (target) {
-      addAuditLog('UPDATE_QUESTION', `Menghapus paket soal: "${target.title}" (${target.code})`);
+      addAuditLog(
+        'DELETE_PACKET',
+        `Menghapus paket soal: "${target.title}" (${target.code})`,
+        undefined,
+        undefined,
+        undefined,
+        {
+          targetType: 'packet',
+          targetId: id,
+          previousData: target,
+        }
+      );
     }
   };
 
@@ -1645,6 +1827,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         field: 'status',
         oldValue: target.status,
         newValue: newStatus,
+      },
+      {
+        targetType: 'question',
+        targetId: target.id,
+        previousData: target,
+        newData: updatedQ,
       }
     );
 
@@ -1660,23 +1848,48 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const addCategory = (cat: CategoryMetadata) => {
     setCategories((prev) => [...prev, cat]);
     syncCategoryToFirestore(cat);
-    addAuditLog('CONFIG_CHANGE', `Menambahkan subtes kategori baru: ${cat.name}`);
+    addAuditLog(
+      'CONFIG_CHANGE',
+      `Menambahkan subtes kategori baru: ${cat.name}`,
+      undefined,
+      undefined,
+      undefined,
+      {
+        targetType: 'category',
+        targetId: cat.id,
+        newData: cat,
+      }
+    );
   };
 
   const updateCategory = (id: string, cat: Partial<CategoryMetadata>) => {
     let updatedCat: CategoryMetadata | null = null;
+    let oldCat: CategoryMetadata | null = null;
     setCategories((prev) =>
       prev.map((item) => {
         if (item.id !== id) return item;
+        oldCat = item;
         const updated = { ...item, ...cat };
         updatedCat = updated;
         return updated;
       })
     );
-    if (updatedCat) {
+    if (updatedCat && oldCat) {
       syncCategoryToFirestore(updatedCat);
+      addAuditLog(
+        'CONFIG_CHANGE',
+        `Memperbarui subtes kategori: ${(oldCat as CategoryMetadata).name}`,
+        undefined,
+        undefined,
+        undefined,
+        {
+          targetType: 'category',
+          targetId: id,
+          previousData: oldCat,
+          newData: updatedCat,
+        }
+      );
     }
-    addAuditLog('CONFIG_CHANGE', `Memperbarui subtes kategori ID: ${id}`);
   };
 
   const deleteCategory = (id: string) => {
@@ -1684,7 +1897,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (!target) return;
     setCategories((prev) => prev.filter((c) => c.id !== id));
     removeCategoryFromFirestore(id);
-    addAuditLog('CONFIG_CHANGE', `Menghapus subtes kategori: ${target.name}`);
+    addAuditLog(
+      'CONFIG_CHANGE',
+      `Menghapus subtes kategori: ${target.name}`,
+      undefined,
+      undefined,
+      undefined,
+      {
+        targetType: 'category',
+        targetId: id,
+        previousData: target,
+      }
+    );
   };
 
   const markNotificationRead = (id: string) => {
@@ -2069,6 +2293,362 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   };
 
+  // Full System Backup Export
+  const exportFullSystemBackup = (): { success: boolean; message: string } => {
+    try {
+      const backupData = generateJSONDatabase(questions, users, categories, auditLogs, packets);
+      const jsonStr = JSON.stringify(backupData, null, 2);
+      const blob = new Blob([jsonStr], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+      a.download = `backup_tkad_adiwerna_full_${timestamp}.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+
+      addAuditLog(
+        'CONFIG_CHANGE',
+        `Administrator mengunduh full backup sistem (${questions.length} butir soal, ${users.length} pengguna, ${packets.length} paket, ${categories.length} kategori).`
+      );
+      return { success: true, message: 'File backup lengkap berhasil diunduh.' };
+    } catch (err: any) {
+      return { success: false, message: `Gagal mengunduh backup: ${err.message || err}` };
+    }
+  };
+
+  // Full System Backup Restore with Snapshot for Rollback
+  const restoreFullSystemBackup = async (
+    rawJson: string,
+    mode: 'replace' | 'merge' = 'replace'
+  ): Promise<{
+    success: boolean;
+    message: string;
+    counts: { questions: number; users: number; packets: number; categories: number };
+  }> => {
+    const res = validateAndParseJSONDatabase(rawJson);
+    if (!res.valid || !res.data) {
+      return {
+        success: false,
+        message: res.message,
+        counts: { questions: 0, users: 0, packets: 0, categories: 0 },
+      };
+    }
+
+    const {
+      questions: restoredQuestions,
+      users: restoredUsers,
+      categories: restoredCategories,
+      packets: restoredPackets,
+      auditLogs: restoredLogs,
+    } = res.data;
+
+    // Snapshot current state for rollback
+    const previousStateSnapshot = {
+      questions: [...questions],
+      users: [...users],
+      categories: [...categories],
+      packets: [...packets],
+    };
+
+    let finalQuestions: Question[] = [];
+    let finalUsers: User[] = [];
+    let finalCategories: CategoryMetadata[] = [];
+    let finalPackets: QuestionPacket[] = [];
+
+    if (mode === 'replace') {
+      finalQuestions = restoredQuestions.length > 0 ? restoredQuestions : questions;
+      finalUsers = restoredUsers.length > 0 ? restoredUsers : users;
+      finalCategories = restoredCategories.length > 0 ? restoredCategories : categories;
+      finalPackets = restoredPackets && restoredPackets.length > 0 ? restoredPackets : packets;
+    } else {
+      // Merge mode
+      const qMap = new Map<string, Question>();
+      questions.forEach((q) => qMap.set(q.id, q));
+      restoredQuestions.forEach((q) => qMap.set(q.id, q));
+      finalQuestions = Array.from(qMap.values());
+
+      const uMap = new Map<string, User>();
+      users.forEach((u) => uMap.set(u.id, u));
+      restoredUsers.forEach((u) => uMap.set(u.id, u));
+      finalUsers = Array.from(uMap.values());
+
+      const cMap = new Map<string, CategoryMetadata>();
+      categories.forEach((c) => cMap.set(c.id, c));
+      restoredCategories.forEach((c) => cMap.set(c.id, c));
+      finalCategories = Array.from(cMap.values());
+
+      const pMap = new Map<string, QuestionPacket>();
+      packets.forEach((p) => pMap.set(p.id, p));
+      if (restoredPackets) {
+        restoredPackets.forEach((p) => pMap.set(p.id, p));
+      }
+      finalPackets = Array.from(pMap.values());
+    }
+
+    // Ensure root admin stays present
+    const hasRoot = finalUsers.some((u) => u.email.toLowerCase() === 'root@tkad.adiwerna');
+    if (!hasRoot) {
+      const rootUser: User = {
+        id: 'usr-admin-root',
+        name: 'Root Administrator',
+        email: 'root@tkad.adiwerna',
+        role: 'admin',
+        roles: ['admin'],
+        avatar: 'RT',
+        password: 'tkadw2026#',
+        isDefaultPassword: false,
+        status: 'aktif',
+        createdAt: new Date().toISOString(),
+      };
+      finalUsers.push(rootUser);
+    }
+
+    setQuestions(finalQuestions);
+    setUsers(finalUsers);
+    setCategories(finalCategories);
+    setPackets(finalPackets);
+
+    // Sync to Firestore
+    for (const q of finalQuestions) {
+      await syncQuestionToFirestore(q);
+    }
+    for (const u of finalUsers) {
+      await syncUserToFirestore(u);
+    }
+    for (const c of finalCategories) {
+      await syncCategoryToFirestore(c);
+    }
+    for (const p of finalPackets) {
+      await syncPacketToFirestore(p);
+    }
+
+    addAuditLog(
+      'RESTORE_DATABASE',
+      `Restore Basis Data (${mode === 'replace' ? 'Mode Timpa Penuh' : 'Mode Penggabungan'}): ${finalQuestions.length} butir soal, ${finalUsers.length} pengguna, ${finalPackets.length} paket, ${finalCategories.length} kategori.`,
+      undefined,
+      undefined,
+      undefined,
+      {
+        targetType: 'system_database',
+        previousData: previousStateSnapshot,
+        newData: {
+          questions: finalQuestions,
+          users: finalUsers,
+          categories: finalCategories,
+          packets: finalPackets,
+        },
+      }
+    );
+
+    return {
+      success: true,
+      message: `Restore data berhasil diproses (${mode === 'replace' ? 'Mode Timpa Penuh' : 'Mode Penggabungan'}).`,
+      counts: {
+        questions: finalQuestions.length,
+        users: finalUsers.length,
+        packets: finalPackets.length,
+        categories: finalCategories.length,
+      },
+    };
+  };
+
+  // Rollback Action on Audit Logs
+  const rollbackAuditLog = async (logId: string): Promise<{ success: boolean; message: string }> => {
+    const log = auditLogs.find((l) => l.id === logId);
+    if (!log) {
+      return { success: false, message: 'Entri log audit tidak ditemukan.' };
+    }
+    if (log.rolledBack) {
+      return { success: false, message: 'Tindakan ini sudah pernah di-rollback sebelumnya.' };
+    }
+
+    try {
+      let rollbackSummary = '';
+      const snap = log.snapshot;
+
+      if (snap) {
+        if (snap.targetType === 'question') {
+          if (snap.previousData && snap.newData) {
+            // Restore previousData
+            setQuestions((prev) => {
+              const exists = prev.some((q) => q.id === snap.targetId);
+              if (exists) {
+                return prev.map((q) => (q.id === snap.targetId ? snap.previousData : q));
+              } else {
+                return [snap.previousData, ...prev];
+              }
+            });
+            await syncQuestionToFirestore(snap.previousData);
+            rollbackSummary = `Mengembalikan soal ${snap.previousData.code || snap.targetId} ke versi sebelum perubahan.`;
+          } else if (snap.newData && !snap.previousData) {
+            // It was created -> delete it
+            setQuestions((prev) => prev.filter((q) => q.id !== snap.targetId));
+            if (snap.targetId) await removeQuestionFromFirestore(snap.targetId);
+            rollbackSummary = `Menghapus butir soal yang dibuat pada tindakan ini.`;
+          } else if (snap.previousData && !snap.newData) {
+            // It was deleted -> restore it
+            setQuestions((prev) => [snap.previousData, ...prev]);
+            await syncQuestionToFirestore(snap.previousData);
+            rollbackSummary = `Memulihkan butir soal ${snap.previousData.code} yang sebelumnya dihapus.`;
+          }
+        } else if (snap.targetType === 'bulk_questions') {
+          if (Array.isArray(snap.previousData)) {
+            const toRestore: Question[] = snap.previousData;
+            setQuestions((prev) => {
+              const existingIds = new Set(prev.map((q) => q.id));
+              const newItems = toRestore.filter((q) => !existingIds.has(q.id));
+              return [...newItems, ...prev];
+            });
+            for (const q of toRestore) {
+              await syncQuestionToFirestore(q);
+            }
+            rollbackSummary = `Memulihkan ${toRestore.length} butir soal yang terhapus secara massal.`;
+          }
+        } else if (snap.targetType === 'user') {
+          if (snap.previousData && snap.newData) {
+            setUsers((prev) => prev.map((u) => (u.id === snap.targetId ? snap.previousData : u)));
+            await syncUserToFirestore(snap.previousData);
+            rollbackSummary = `Mengembalikan data pengguna ${snap.previousData.name} (${snap.previousData.email}).`;
+          } else if (snap.newData && !snap.previousData) {
+            setUsers((prev) => prev.filter((u) => u.id !== snap.targetId));
+            if (snap.targetId) await removeUserFromFirestore(snap.targetId);
+            rollbackSummary = `Menghapus pengguna baru yang dibuat.`;
+          } else if (snap.previousData && !snap.newData) {
+            setUsers((prev) => [...prev, snap.previousData]);
+            await syncUserToFirestore(snap.previousData);
+            rollbackSummary = `Memulihkan akun pengguna ${snap.previousData.name}.`;
+          }
+        } else if (snap.targetType === 'packet') {
+          if (snap.previousData && snap.newData) {
+            setPackets((prev) => prev.map((p) => (p.id === snap.targetId ? snap.previousData : p)));
+            await syncPacketToFirestore(snap.previousData);
+            rollbackSummary = `Mengembalikan data paket soal ${snap.previousData.title}.`;
+          } else if (snap.newData && !snap.previousData) {
+            setPackets((prev) => prev.filter((p) => p.id !== snap.targetId));
+            if (snap.targetId) await removePacketFromFirestore(snap.targetId);
+            rollbackSummary = `Menghapus paket soal yang dibuat.`;
+          } else if (snap.previousData && !snap.newData) {
+            setPackets((prev) => [...prev, snap.previousData]);
+            await syncPacketToFirestore(snap.previousData);
+            rollbackSummary = `Memulihkan paket soal ${snap.previousData.title}.`;
+          }
+        } else if (snap.targetType === 'category') {
+          if (snap.previousData && snap.newData) {
+            setCategories((prev) => prev.map((c) => (c.id === snap.targetId ? snap.previousData : c)));
+            await syncCategoryToFirestore(snap.previousData);
+            rollbackSummary = `Mengembalikan subtes kategori ${snap.previousData.name}.`;
+          } else if (snap.newData && !snap.previousData) {
+            setCategories((prev) => prev.filter((c) => c.id !== snap.targetId));
+            if (snap.targetId) await removeCategoryFromFirestore(snap.targetId);
+            rollbackSummary = `Menghapus subtes kategori yang ditambahkan.`;
+          } else if (snap.previousData && !snap.newData) {
+            setCategories((prev) => [...prev, snap.previousData]);
+            await syncCategoryToFirestore(snap.previousData);
+            rollbackSummary = `Memulihkan subtes kategori ${snap.previousData.name}.`;
+          }
+        } else if (snap.targetType === 'system_database' && snap.previousData) {
+          if (Array.isArray(snap.previousData.questions)) {
+            setQuestions(snap.previousData.questions);
+            for (const q of snap.previousData.questions) {
+              await syncQuestionToFirestore(q);
+            }
+          }
+          if (Array.isArray(snap.previousData.users)) {
+            setUsers(snap.previousData.users);
+            for (const u of snap.previousData.users) {
+              await syncUserToFirestore(u);
+            }
+          }
+          if (Array.isArray(snap.previousData.packets)) {
+            setPackets(snap.previousData.packets);
+            for (const p of snap.previousData.packets) {
+              await syncPacketToFirestore(p);
+            }
+          }
+          if (Array.isArray(snap.previousData.categories)) {
+            setCategories(snap.previousData.categories);
+            for (const c of snap.previousData.categories) {
+              await syncCategoryToFirestore(c);
+            }
+          }
+          rollbackSummary = `Mengembalikan basis data ke kondisi sebelum proses restore.`;
+        }
+      } else {
+        // Heuristic fallback for logs without full snapshot
+        if (
+          log.action === 'APPROVE' ||
+          log.action === 'REJECT' ||
+          log.action === 'REQUEST_CHANGES' ||
+          log.action === 'RECALL' ||
+          log.action === 'UPDATE_QUESTION'
+        ) {
+          if (log.questionId && log.details?.field === 'status' && log.details.oldValue) {
+            const oldStatus = log.details.oldValue as Question['status'];
+            setQuestions((prev) =>
+              prev.map((q) => {
+                if (q.id === log.questionId) {
+                  const updated = { ...q, status: oldStatus, updatedAt: new Date().toISOString() };
+                  syncQuestionToFirestore(updated);
+                  return updated;
+                }
+                return q;
+              })
+            );
+            rollbackSummary = `Mengembalikan status soal ${log.questionCode || log.questionId} menjadi '${oldStatus}'.`;
+          } else if (log.questionId) {
+            setQuestions((prev) =>
+              prev.map((q) => {
+                if (q.id === log.questionId && q.versions && q.versions.length > 1) {
+                  const prevVer = q.versions[1];
+                  const updated: Question = {
+                    ...q,
+                    prompt: prevVer.snapshot?.prompt || q.prompt,
+                    status: (prevVer.snapshot?.status as Question['status']) || q.status,
+                    version: prevVer.versionNumber || q.version,
+                    updatedAt: new Date().toISOString(),
+                  };
+                  syncQuestionToFirestore(updated);
+                  return updated;
+                }
+                return q;
+              })
+            );
+            rollbackSummary = `Mengembalikan versi naskah soal ${log.questionCode || log.questionId}.`;
+          }
+        } else if (log.action === 'CREATE_QUESTION' && log.questionId) {
+          setQuestions((prev) => prev.filter((q) => q.id !== log.questionId));
+          await removeQuestionFromFirestore(log.questionId);
+          rollbackSummary = `Menghapus butir soal baru ${log.questionCode || log.questionId}.`;
+        } else {
+          rollbackSummary = `Rollback tindakan ${log.action} selesai diproses.`;
+        }
+      }
+
+      const updatedLog: AuditLog = {
+        ...log,
+        rolledBack: true,
+        rolledBackAt: new Date().toISOString(),
+        rolledBackBy: currentUser.name,
+      };
+
+      setAuditLogs((prev) => prev.map((l) => (l.id === logId ? updatedLog : l)));
+      await syncLogToFirestore(updatedLog);
+
+      addAuditLog(
+        'ROLLBACK',
+        `Rollback berhasil dilakukan oleh ${currentUser.name} pada tindakan [${log.action}]: ${rollbackSummary}`
+      );
+
+      return { success: true, message: `Berhasil melakukan rollback: ${rollbackSummary}` };
+    } catch (err: any) {
+      console.error('Rollback error:', err);
+      return { success: false, message: `Gagal melakukan rollback: ${err.message || err}` };
+    }
+  };
+
   const visibleQuestions = React.useMemo(() => {
     return questions.filter((q) => isUserAuthorizedForSubtest(currentUser, q.subtest));
   }, [questions, currentUser]);
@@ -2091,6 +2671,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         theme,
         toggleTheme,
         users,
+        setUsers,
         addUser,
         updateUser,
         deleteUser,
@@ -2101,9 +2682,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         isPasswordChangeForced,
         setIsPasswordChangeForced,
         questions: visibleQuestions,
+        setQuestions,
         packets,
+        setPackets,
         categories: visibleCategories,
+        setCategories,
         auditLogs,
+        setAuditLogs,
         notifications,
         activeTab,
         setActiveTab,
@@ -2132,6 +2717,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         addCategory,
         updateCategory,
         deleteCategory,
+        logAudit,
+        rollbackAuditLog,
+        exportFullSystemBackup,
+        restoreFullSystemBackup,
         markNotificationRead,
         markAllNotificationsRead,
         spreadsheetId,

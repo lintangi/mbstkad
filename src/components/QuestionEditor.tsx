@@ -139,51 +139,83 @@ export const QuestionEditor: React.FC = () => {
     const file = e.target.files?.[0];
     if (!file) return;
 
+    // Limit upload file size to 10MB
+    const maxSizeBytes = 10 * 1024 * 1024; // 10MB
+    if (file.size > maxSizeBytes) {
+      setUploadError(`Ukuran berkas (${(file.size / 1024 / 1024).toFixed(2)} MB) melebihi batas maksimum 10 MB.`);
+      setIsUploading(false);
+      e.target.value = '';
+      return;
+    }
+
     setIsUploading(true);
-    setUploadProgress(0);
-    setUploadStatus('Menghubungkan & Mengautentikasi ke Google Drive...');
+    setUploadProgress(10);
+    setUploadStatus('Membaca berkas dari perangkat...');
     setUploadError(null);
 
-    try {
-      // Step 1: Securely obtain token (either cached or via prompt/popup)
-      const token = await getDriveToken();
-      
-      setUploadProgress(35);
-      setUploadStatus(`Mengunggah "${file.name}" (${(file.size / 1024).toFixed(1)} KB)...`);
+    const reader = new FileReader();
+    reader.onload = async () => {
+      try {
+        setUploadProgress(40);
+        setUploadStatus(`Mengunggah "${file.name}" (${(file.size / 1024).toFixed(1)} KB) ke server...`);
 
-      // Step 2: Upload file directly using Google Drive v3 REST API
-      const result = await uploadToGoogleDrive(file, token);
+        const response = await fetch('/api/upload', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            filename: file.name,
+            filetype: file.type,
+            base64: reader.result as string,
+          }),
+        });
 
-      setUploadProgress(85);
-      setUploadStatus('Mengatur hak akses file & sinkronisasi eksternal...');
+        if (!response.ok) {
+          const errData = await response.json().catch(() => ({ message: 'Gagal merespon dari server.' }));
+          throw new Error(errData.message || 'Gagal mengunggah berkas ke server.');
+        }
 
-      // Step 3: Register successfully created file as a question attachment
-      const newId = `att-${Date.now()}`;
-      const newAtt: QuestionAttachment = {
-        id: newId,
-        name: result.name,
-        type: file.type.startsWith('video') ? 'document' : file.type.startsWith('audio') ? 'audio' : 'image',
-        url: result.url,
-        size: result.size,
-      };
+        const result = await response.json();
+        setUploadProgress(90);
+        setUploadStatus('Menyelesaikan pemrosesan lampiran...');
 
-      setAttachments((prev) => [...prev, newAtt]);
-      setUploadProgress(100);
-      setUploadStatus('Berkas berhasil terunggah ke Google Drive!');
-      
-      setTimeout(() => {
+        // Register successfully created file as a question attachment
+        const newId = `att-${Date.now()}`;
+        const newAtt: QuestionAttachment = {
+          id: newId,
+          name: result.name,
+          type: file.type.startsWith('video') ? 'document' : file.type.startsWith('audio') ? 'audio' : 'image',
+          url: result.url,
+          size: result.size,
+          width: 100, // default size percentage
+          align: 'center', // default alignment
+        };
+
+        setAttachments((prev) => [...prev, newAtt]);
+        setUploadProgress(100);
+        setUploadStatus('Berkas berhasil terlampir dan siap dipratinjau!');
+
+        setTimeout(() => {
+          setIsUploading(false);
+          setUploadProgress(0);
+          setUploadStatus('');
+        }, 1500);
+      } catch (err: any) {
+        console.error('Upload Error:', err);
+        setUploadError(err.message || 'Gagal mengunggah file. Silakan coba lagi.');
         setIsUploading(false);
-        setUploadProgress(0);
-        setUploadStatus('');
-      }, 1500);
-    } catch (err: any) {
-      console.error('Google Drive Upload Error:', err);
-      setUploadError(err.message || 'Gagal mengunggah file ke Google Drive. Pastikan Anda menyetujui izin akses.');
+      }
+    };
+
+    reader.onerror = () => {
+      setUploadError('Gagal membaca berkas dari perangkat Anda.');
       setIsUploading(false);
-    } finally {
-      // Reset input element value to allow uploading same file again
-      e.target.value = '';
-    }
+    };
+
+    reader.readAsDataURL(file);
+    // Reset input element value to allow uploading same file again
+    e.target.value = '';
   };
 
   // Sync subtest when user role/department changes
@@ -707,29 +739,82 @@ export const QuestionEditor: React.FC = () => {
             )}
 
             {attachments.length > 0 && (
-              <div className="space-y-2 pt-2.5 border-t border-slate-100 dark:border-slate-800/80">
+              <div className="space-y-3.5 pt-2.5 border-t border-slate-100 dark:border-slate-800/80">
                 <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500">Berkas Terlampir ({attachments.length})</span>
-                {attachments.map((att, idx) => (
-                  <div key={att.id} className="flex items-center justify-between p-2 bg-slate-50 dark:bg-slate-800/40 rounded-xl text-xs border border-slate-100 dark:border-slate-800/50">
-                    <div className="flex items-center space-x-2 truncate pr-4">
-                      <ImageIcon className="w-3.5 h-3.5 text-blue-500 shrink-0" />
-                      <div className="truncate text-left">
-                        <p className="truncate font-medium text-slate-800 dark:text-slate-200">{att.name}</p>
-                        {att.size && <span className="text-[9px] text-slate-400 block font-mono">{att.size}</span>}
+                {attachments.map((att, idx) => {
+                  const updateAttachmentConfig = (width: number, align: 'left' | 'center' | 'right') => {
+                    setAttachments((prev) =>
+                      prev.map((item, i) => (i === idx ? { ...item, width, align } : item))
+                    );
+                  };
+
+                  return (
+                    <div key={att.id} className="p-3 bg-slate-50 dark:bg-slate-800/40 rounded-xl text-xs border border-slate-100 dark:border-slate-800/50 space-y-2.5">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center space-x-2 truncate pr-4">
+                          <ImageIcon className="w-4 h-4 text-blue-500 shrink-0" />
+                          <div className="truncate text-left">
+                            <p className="truncate font-medium text-slate-800 dark:text-slate-200">{att.name}</p>
+                            {att.size && <span className="text-[10px] text-slate-400 block font-mono">{att.size}</span>}
+                          </div>
+                        </div>
+                        {editPermission.allowed && (
+                          <button
+                            type="button"
+                            onClick={() => setAttachments((prev) => prev.filter((_, i) => i !== idx))}
+                            className="text-slate-400 hover:text-red-600 transition p-1 cursor-pointer shrink-0"
+                            title="Hapus Lampiran"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                      </div>
+
+                      {/* Formatting controls (size & position) */}
+                      <div className="pt-2 border-t border-slate-100 dark:border-slate-800/50 flex flex-wrap gap-x-4 gap-y-2 items-center justify-between text-[11px]">
+                        <div className="flex items-center space-x-2">
+                          <span className="text-slate-400 font-semibold uppercase tracking-wider text-[9px]">Ukuran:</span>
+                          <div className="flex items-center space-x-1">
+                            {[25, 50, 75, 100].map((w) => (
+                              <button
+                                key={w}
+                                type="button"
+                                onClick={() => updateAttachmentConfig(w, att.align || 'center')}
+                                className={`px-2 py-0.5 rounded text-[10px] font-bold transition cursor-pointer ${
+                                  (att.width || 100) === w
+                                    ? 'bg-blue-600 text-white shadow-xs'
+                                    : 'bg-white dark:bg-slate-700 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-600 hover:bg-slate-100 dark:hover:bg-slate-600'
+                                }`}
+                              >
+                                {w}%
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+
+                        <div className="flex items-center space-x-2">
+                          <span className="text-slate-400 font-semibold uppercase tracking-wider text-[9px]">Posisi:</span>
+                          <div className="flex items-center space-x-1">
+                            {(['left', 'center', 'right'] as const).map((pos) => (
+                              <button
+                                key={pos}
+                                type="button"
+                                onClick={() => updateAttachmentConfig(att.width || 100, pos)}
+                                className={`px-2 py-0.5 rounded text-[10px] font-bold capitalize transition cursor-pointer ${
+                                  (att.align || 'center') === pos
+                                    ? 'bg-blue-600 text-white shadow-xs'
+                                    : 'bg-white dark:bg-slate-700 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-600 hover:bg-slate-100 dark:hover:bg-slate-600'
+                                }`}
+                              >
+                                {pos === 'left' ? 'Kiri' : pos === 'center' ? 'Tengah' : 'Kanan'}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
                       </div>
                     </div>
-                    {editPermission.allowed && (
-                      <button
-                        type="button"
-                        onClick={() => setAttachments((prev) => prev.filter((_, i) => i !== idx))}
-                        className="text-slate-400 hover:text-red-600 transition p-1 cursor-pointer"
-                        title="Hapus Lampiran"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
-                    )}
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>
@@ -806,15 +891,32 @@ export const QuestionEditor: React.FC = () => {
                 <div className="bg-white dark:bg-slate-850 p-3.5 rounded-lg border border-slate-200 dark:border-slate-700">
                   <LatexRenderer content={prompt} />
                   {attachments.length > 0 && (
-                    <div className="mt-3 grid grid-cols-2 gap-2">
-                      {attachments.map((att) => (
-                        <img
-                          key={att.id}
-                          src={att.url}
-                          alt={att.name}
-                          className="max-h-48 object-contain rounded border border-slate-200 dark:border-slate-700 mx-auto"
-                        />
-                      ))}
+                    <div className="mt-4 space-y-4">
+                      {attachments.map((att) => {
+                        const alignClass = 
+                          att.align === 'left' ? 'text-left' :
+                          att.align === 'right' ? 'text-right' :
+                          'text-center';
+
+                        const alignImgClass = 
+                          att.align === 'left' ? 'mr-auto ml-0' :
+                          att.align === 'right' ? 'ml-auto mr-0' :
+                          'mx-auto';
+
+                        const widthStyle = att.width ? `${att.width}%` : '100%';
+
+                        return (
+                          <div key={att.id} className={alignClass}>
+                            <img
+                              src={att.url}
+                              alt={att.name}
+                              style={{ width: widthStyle }}
+                              className={`max-h-96 object-contain rounded border border-slate-200 dark:border-slate-700 ${alignImgClass}`}
+                            />
+                            <p className="text-[10px] text-slate-400 mt-1 italic">{att.name}</p>
+                          </div>
+                        );
+                      })}
                     </div>
                   )}
                 </div>

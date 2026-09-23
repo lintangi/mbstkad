@@ -196,17 +196,32 @@ export const QuestionDetailModal: React.FC = () => {
                 </div>
 
                 {question.attachments.length > 0 && (
-                  <div className="pt-3 border-t border-slate-100 dark:border-slate-800 grid grid-cols-2 gap-3">
-                    {question.attachments.map((att) => (
-                      <div key={att.id} className="text-center">
-                        <img
-                          src={att.url}
-                          alt={att.name}
-                          className="max-h-56 mx-auto rounded-lg border border-slate-200 dark:border-slate-700 object-contain shadow-2xs"
-                        />
-                        <span className="text-[11px] text-slate-500 dark:text-slate-400 mt-1 block">{att.name}</span>
-                      </div>
-                    ))}
+                  <div className="pt-3 border-t border-slate-100 dark:border-slate-800 space-y-4">
+                    {question.attachments.map((att) => {
+                      const alignClass = 
+                        att.align === 'left' ? 'text-left' :
+                        att.align === 'right' ? 'text-right' :
+                        'text-center';
+
+                      const alignImgClass = 
+                        att.align === 'left' ? 'mr-auto ml-0' :
+                        att.align === 'right' ? 'ml-auto mr-0' :
+                        'mx-auto';
+
+                      const widthStyle = att.width ? `${att.width}%` : '100%';
+
+                      return (
+                        <div key={att.id} className={alignClass}>
+                          <img
+                            src={att.url}
+                            alt={att.name}
+                            style={{ width: widthStyle }}
+                            className={`max-h-80 rounded-lg border border-slate-200 dark:border-slate-700 object-contain shadow-2xs ${alignImgClass}`}
+                          />
+                          <span className="text-[11px] text-slate-500 dark:text-slate-400 mt-1 block italic">{att.name}</span>
+                        </div>
+                      );
+                    })}
                   </div>
                 )}
               </div>

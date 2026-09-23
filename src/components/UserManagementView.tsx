@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useMemo } from 'react';
 import {
   Users,
   Edit2,
@@ -20,6 +20,9 @@ import {
   AlertTriangle,
   Database,
   Check,
+  ArrowUpDown,
+  ArrowUp,
+  ArrowDown,
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { User, UserRole } from '../types';
@@ -47,6 +50,8 @@ export const UserManagementView: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [roleFilter, setRoleFilter] = useState<'all' | UserRole>('all');
   const [statusFilter, setStatusFilter] = useState<'all' | 'aktif' | 'nonaktif'>('all');
+  const [sortBy, setSortBy] = useState<'name' | 'role' | 'department' | 'status'>('name');
+  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
 
   // Modals
   const [editingUser, setEditingUser] = useState<User | null>(null);
@@ -54,6 +59,16 @@ export const UserManagementView: React.FC = () => {
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
   const [feedbackMsg, setFeedbackMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [isDualSyncing, setIsDualSyncing] = useState(false);
+
+  // Toggle sort helper
+  const handleSortToggle = (field: 'name' | 'role' | 'department' | 'status') => {
+    if (sortBy === field) {
+      setSortDirection((prev) => (prev === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setSortBy(field);
+      setSortDirection('asc');
+    }
+  };
 
   // Form states for Single Add / Edit
   const [formName, setFormName] = useState('');
@@ -198,6 +213,7 @@ export const UserManagementView: React.FC = () => {
         name: row.name,
         email: row.email,
         role: row.role,
+        roles: row.roles && row.roles.length > 0 ? row.roles : [row.role],
         department: row.department,
         password: row.password || 'password123',
         status: row.status,
@@ -242,22 +258,52 @@ export const UserManagementView: React.FC = () => {
     }
   };
 
-  // Filtered users
-  const filteredUsers = users.filter((u) => {
-    if (roleFilter !== 'all') {
-      const uRoles = u.roles && u.roles.length > 0 ? u.roles : [u.role];
-      if (!uRoles.includes(roleFilter)) return false;
-    }
-    if (statusFilter !== 'all' && (u.status || 'aktif') !== statusFilter) return false;
-    if (searchTerm.trim()) {
-      const q = searchTerm.toLowerCase();
-      const matchName = u.name.toLowerCase().includes(q);
-      const matchEmail = u.email.toLowerCase().includes(q);
-      const matchDept = (u.department || '').toLowerCase().includes(q);
-      return matchName || matchEmail || matchDept;
-    }
-    return true;
-  });
+  // Filtered & Sorted users
+  const filteredAndSortedUsers = useMemo(() => {
+    const filtered = users.filter((u) => {
+      if (roleFilter !== 'all') {
+        const uRoles = u.roles && u.roles.length > 0 ? u.roles : [u.role];
+        if (!uRoles.includes(roleFilter)) return false;
+      }
+      if (statusFilter !== 'all' && (u.status || 'aktif') !== statusFilter) return false;
+      if (searchTerm.trim()) {
+        const q = searchTerm.toLowerCase();
+        const matchName = u.name.toLowerCase().includes(q);
+        const matchEmail = u.email.toLowerCase().includes(q);
+        const matchDept = (u.department || '').toLowerCase().includes(q);
+        return matchName || matchEmail || matchDept;
+      }
+      return true;
+    });
+
+    return [...filtered].sort((a, b) => {
+      let comparison = 0;
+      if (sortBy === 'name') {
+        comparison = a.name.localeCompare(b.name, 'id', { sensitivity: 'base' });
+      } else if (sortBy === 'role') {
+        const roleOrder: Record<string, number> = { admin: 1, reviewer: 2, pembuat: 3 };
+        const aRoleRank = roleOrder[a.role] || 99;
+        const bRoleRank = roleOrder[b.role] || 99;
+        comparison = aRoleRank - bRoleRank;
+        if (comparison === 0) {
+          comparison = a.name.localeCompare(b.name, 'id', { sensitivity: 'base' });
+        }
+      } else if (sortBy === 'department') {
+        const aDept = a.department || '';
+        const bDept = b.department || '';
+        comparison = aDept.localeCompare(bDept, 'id', { sensitivity: 'base' });
+        if (comparison === 0) {
+          comparison = a.name.localeCompare(b.name, 'id', { sensitivity: 'base' });
+        }
+      } else if (sortBy === 'status') {
+        const aStatus = a.status || 'aktif';
+        const bStatus = b.status || 'aktif';
+        comparison = aStatus.localeCompare(bStatus);
+      }
+
+      return sortDirection === 'asc' ? comparison : -comparison;
+    });
+  }, [users, roleFilter, statusFilter, searchTerm, sortBy, sortDirection]);
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-6">
@@ -366,8 +412,8 @@ export const UserManagementView: React.FC = () => {
       )}
 
       {/* Search & Filter Bar */}
-      <div className="bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xs flex flex-col sm:flex-row gap-3 items-center justify-between">
-        <div className="relative w-full sm:w-80">
+      <div className="bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xs flex flex-col lg:flex-row gap-3 items-center justify-between">
+        <div className="relative w-full lg:w-80">
           <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
           <input
             type="text"
@@ -378,7 +424,30 @@ export const UserManagementView: React.FC = () => {
           />
         </div>
 
-        <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
+        <div className="flex flex-wrap items-center gap-2 w-full lg:w-auto">
+          {/* Sort By Dropdown */}
+          <div className="flex items-center space-x-1.5 bg-slate-50 dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 px-2.5 py-1 text-xs">
+            <ArrowUpDown className="w-3.5 h-3.5 text-purple-600 dark:text-purple-400 shrink-0" />
+            <span className="text-slate-500 dark:text-slate-400 text-[11px] font-medium hidden sm:inline">Urutkan:</span>
+            <select
+              value={`${sortBy}-${sortDirection}`}
+              onChange={(e) => {
+                const [field, dir] = e.target.value.split('-') as [any, any];
+                setSortBy(field);
+                setSortDirection(dir);
+              }}
+              className="bg-transparent text-slate-800 dark:text-slate-200 text-xs font-semibold focus:outline-none cursor-pointer py-1"
+            >
+              <option value="name-asc">Abjad Nama (A - Z)</option>
+              <option value="name-desc">Abjad Nama (Z - A)</option>
+              <option value="role-asc">Peran / Role (Admin &rarr; Penyusun)</option>
+              <option value="role-desc">Peran / Role (Penyusun &rarr; Admin)</option>
+              <option value="department-asc">Departemen (A - Z)</option>
+              <option value="department-desc">Departemen (Z - A)</option>
+              <option value="status-asc">Status Akun (Aktif Dulu)</option>
+            </select>
+          </div>
+
           {/* Role Filter */}
           <select
             value={roleFilter}
@@ -408,25 +477,77 @@ export const UserManagementView: React.FC = () => {
       <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xs overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-left text-xs text-slate-600 dark:text-slate-300">
-            <thead className="bg-slate-50/80 dark:bg-slate-800/60 border-b border-slate-200 dark:border-slate-700/80 text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+            <thead className="bg-slate-50/80 dark:bg-slate-800/60 border-b border-slate-200 dark:border-slate-700/80 text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 select-none">
               <tr>
-                <th className="py-3.5 px-4">Pengguna</th>
-                <th className="py-3.5 px-4">Peran (Role)</th>
-                <th className="py-3.5 px-4">Departemen / Mapel</th>
-                <th className="py-3.5 px-4">Status</th>
+                <th
+                  onClick={() => handleSortToggle('name')}
+                  className="py-3.5 px-4 cursor-pointer hover:text-purple-600 dark:hover:text-purple-400 transition"
+                  title="Klik untuk mengurutkan berdasarkan nama pengguna"
+                >
+                  <div className="flex items-center space-x-1.5">
+                    <span>Pengguna (Abjad)</span>
+                    {sortBy === 'name' ? (
+                      sortDirection === 'asc' ? <ArrowUp className="w-3.5 h-3.5 text-purple-600" /> : <ArrowDown className="w-3.5 h-3.5 text-purple-600" />
+                    ) : (
+                      <ArrowUpDown className="w-3 h-3 text-slate-400 opacity-60" />
+                    )}
+                  </div>
+                </th>
+                <th
+                  onClick={() => handleSortToggle('role')}
+                  className="py-3.5 px-4 cursor-pointer hover:text-purple-600 dark:hover:text-purple-400 transition"
+                  title="Klik untuk mengurutkan berdasarkan peran"
+                >
+                  <div className="flex items-center space-x-1.5">
+                    <span>Peran (Role)</span>
+                    {sortBy === 'role' ? (
+                      sortDirection === 'asc' ? <ArrowUp className="w-3.5 h-3.5 text-purple-600" /> : <ArrowDown className="w-3.5 h-3.5 text-purple-600" />
+                    ) : (
+                      <ArrowUpDown className="w-3 h-3 text-slate-400 opacity-60" />
+                    )}
+                  </div>
+                </th>
+                <th
+                  onClick={() => handleSortToggle('department')}
+                  className="py-3.5 px-4 cursor-pointer hover:text-purple-600 dark:hover:text-purple-400 transition"
+                  title="Klik untuk mengurutkan berdasarkan departemen / mapel"
+                >
+                  <div className="flex items-center space-x-1.5">
+                    <span>Departemen / Mapel</span>
+                    {sortBy === 'department' ? (
+                      sortDirection === 'asc' ? <ArrowUp className="w-3.5 h-3.5 text-purple-600" /> : <ArrowDown className="w-3.5 h-3.5 text-purple-600" />
+                    ) : (
+                      <ArrowUpDown className="w-3 h-3 text-slate-400 opacity-60" />
+                    )}
+                  </div>
+                </th>
+                <th
+                  onClick={() => handleSortToggle('status')}
+                  className="py-3.5 px-4 cursor-pointer hover:text-purple-600 dark:hover:text-purple-400 transition"
+                  title="Klik untuk mengurutkan berdasarkan status"
+                >
+                  <div className="flex items-center space-x-1.5">
+                    <span>Status</span>
+                    {sortBy === 'status' ? (
+                      sortDirection === 'asc' ? <ArrowUp className="w-3.5 h-3.5 text-purple-600" /> : <ArrowDown className="w-3.5 h-3.5 text-purple-600" />
+                    ) : (
+                      <ArrowUpDown className="w-3 h-3 text-slate-400 opacity-60" />
+                    )}
+                  </div>
+                </th>
                 <th className="py-3.5 px-4">Kata Sandi</th>
                 <th className="py-3.5 px-4 text-right">Aksi</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 dark:divide-slate-800/80">
-              {filteredUsers.length === 0 ? (
+              {filteredAndSortedUsers.length === 0 ? (
                 <tr>
                   <td colSpan={6} className="py-12 text-center text-slate-400 dark:text-slate-500">
-                    Tidak ada data pengguna yang sesuai dengan filter.
+                    Tidak ada data pengguna yang sesuai dengan filter dan pencarian.
                   </td>
                 </tr>
               ) : (
-                filteredUsers.map((user) => {
+                filteredAndSortedUsers.map((user) => {
                   const isCurrent = currentUser.id === user.id;
                   const isDefaultPass = user.isDefaultPassword === true || user.password === 'password123';
                   return (

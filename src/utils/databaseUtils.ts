@@ -1,4 +1,4 @@
-import { Question, User, CategoryMetadata, AuditLog } from '../types';
+import { Question, User, CategoryMetadata, AuditLog, QuestionPacket } from '../types';
 
 export interface JSONDatabaseSchema {
   system: string;
@@ -8,6 +8,7 @@ export interface JSONDatabaseSchema {
     totalQuestions: number;
     totalUsers: number;
     totalCategories: number;
+    totalPackets?: number;
     totalAuditLogs: number;
     schemaVersion: string;
   };
@@ -15,6 +16,7 @@ export interface JSONDatabaseSchema {
     categories: CategoryMetadata[];
     users: User[];
     questions: Question[];
+    packets?: QuestionPacket[];
     auditLogs: AuditLog[];
   };
 }
@@ -385,16 +387,18 @@ export function generateJSONDatabase(
   questions: Question[],
   users: User[],
   categories: CategoryMetadata[],
-  auditLogs: AuditLog[]
+  auditLogs: AuditLog[],
+  packets?: QuestionPacket[]
 ): JSONDatabaseSchema {
   return {
     system: 'TKAD Adiwerna Database Engine',
-    version: '2.5.0-JSON-SQL',
+    version: '3.0.0-FULL-BACKUP',
     exportedAt: new Date().toISOString(),
     metadata: {
       totalQuestions: questions.length,
       totalUsers: users.length,
       totalCategories: categories.length,
+      totalPackets: packets?.length || 0,
       totalAuditLogs: auditLogs.length,
       schemaVersion: 'v3-relational-json',
     },
@@ -402,6 +406,7 @@ export function generateJSONDatabase(
       categories,
       users,
       questions,
+      packets: packets || [],
       auditLogs,
     },
   };
@@ -417,6 +422,7 @@ export function validateAndParseJSONDatabase(rawJson: string): {
     questions: Question[];
     users: User[];
     categories: CategoryMetadata[];
+    packets?: QuestionPacket[];
     auditLogs: AuditLog[];
   };
 } {
@@ -426,15 +432,16 @@ export function validateAndParseJSONDatabase(rawJson: string): {
       return { valid: false, message: 'File JSON kosong atau tidak valid.' };
     }
 
-    // Format A: { data: { questions: [...], users: [...] } }
+    // Format A: { data: { questions: [...], users: [...], packets: [...] } }
     if (parsed.data && Array.isArray(parsed.data.questions)) {
       return {
         valid: true,
-        message: `Valid: Berhasil memuat ${parsed.data.questions.length} butir soal, ${parsed.data.users?.length || 0} pengguna.`,
+        message: `Valid: Berhasil memuat ${parsed.data.questions.length} butir soal, ${parsed.data.users?.length || 0} pengguna, ${parsed.data.packets?.length || 0} paket soal.`,
         data: {
           questions: parsed.data.questions,
           users: parsed.data.users || [],
           categories: parsed.data.categories || [],
+          packets: parsed.data.packets || [],
           auditLogs: parsed.data.auditLogs || [],
         },
       };
@@ -449,6 +456,7 @@ export function validateAndParseJSONDatabase(rawJson: string): {
           questions: parsed,
           users: [],
           categories: [],
+          packets: [],
           auditLogs: [],
         },
       };
@@ -458,11 +466,12 @@ export function validateAndParseJSONDatabase(rawJson: string): {
     if (Array.isArray(parsed.questions)) {
       return {
         valid: true,
-        message: `Valid: Berhasil memuat ${parsed.questions.length} butir soal.`,
+        message: `Valid: Berhasil memuat ${parsed.questions.length} butir soal, ${parsed.users?.length || 0} pengguna.`,
         data: {
           questions: parsed.questions,
           users: parsed.users || [],
           categories: parsed.categories || [],
+          packets: parsed.packets || [],
           auditLogs: parsed.auditLogs || [],
         },
       };

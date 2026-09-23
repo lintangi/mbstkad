@@ -10,15 +10,59 @@ async function startServer() {
   app.use(express.json({ limit: "50mb" }));
   app.use(express.urlencoded({ extended: true, limit: "50mb" }));
 
-  // Ensure data directory exists
+  // Ensure data and uploads directories exist
   const DATA_DIR = path.join(process.cwd(), "data");
   const DB_JSON_FILE = path.join(DATA_DIR, "database_tkad.json");
+  const UPLOADS_DIR = path.join(process.cwd(), "uploads");
 
   try {
     await fs.mkdir(DATA_DIR, { recursive: true });
+    await fs.mkdir(UPLOADS_DIR, { recursive: true });
   } catch (err) {
-    console.error("Could not initialize data directory:", err);
+    console.error("Could not initialize storage directories:", err);
   }
+
+  // Serve uploads directory statically so they render flawlessly in HTML/Previews
+  app.use("/uploads", express.static(UPLOADS_DIR));
+
+  // API: Unauthenticated Media Upload (Base64-based, max 10MB limit)
+  app.post("/api/upload", async (req, res) => {
+    try {
+      const { filename, filetype, base64 } = req.body;
+      
+      if (!filename || !filetype || !base64) {
+        return res.status(400).json({ success: false, message: "Parameter tidak lengkap (filename, filetype, atau base64 tidak ditemukan)." });
+      }
+
+      // Convert base64 to Buffer to determine correct file size
+      const base64Clean = base64.replace(/^data:.*?;base64,/, "");
+      const buffer = Buffer.from(base64Clean, "base64");
+      const fileSizeInBytes = buffer.length;
+      const maxSizeInBytes = 10 * 1024 * 1024; // 10MB limit
+
+      if (fileSizeInBytes > maxSizeInBytes) {
+        return res.status(400).json({ success: false, message: `Ukuran berkas (${(fileSizeInBytes / 1024 / 1024).toFixed(2)}MB) melebihi batas maksimum 10MB.` });
+      }
+
+      // Create a clean safe filename with a unique timestamp prefix to prevent conflicts
+      const timestamp = Date.now();
+      const safeFilename = `${timestamp}_${filename.replace(/[^a-zA-Z0-9.\-_]/g, "_")}`;
+      const filePath = path.join(UPLOADS_DIR, safeFilename);
+
+      await fs.writeFile(filePath, buffer);
+
+      return res.json({
+        success: true,
+        message: "Berkas berhasil diunggah ke server tanpa autentikasi.",
+        url: `/uploads/${safeFilename}`,
+        size: `${(fileSizeInBytes / 1024).toFixed(1)} KB`,
+        name: filename,
+      });
+    } catch (err: any) {
+      console.error("Error in unauthenticated /api/upload:", err);
+      return res.status(500).json({ success: false, message: `Gagal mengunggah berkas: ${err.message || err}` });
+    }
+  });
 
   // API: Health check
   app.get("/api/health", (req, res) => {
