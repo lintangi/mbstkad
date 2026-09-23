@@ -194,15 +194,17 @@ const STORAGE_KEY_GAS_URL = 'tkad_gas_url_v3';
 const STORAGE_KEY_SPREADSHEET_ID = 'tkad_spreadsheet_id_v3';
 const STORAGE_KEY_AUTOSYNC = 'tkad_autosync_v3';
 
-export const DEFAULT_SPREADSHEET_ID = '1tEGcYctNnoyNTLjI1JZ_QWUuR6BU4DtnTvjLYM-Fn8M';
-export const DEFAULT_GAS_URL = 'https://script.google.com/macros/s/AKfycbxS5m7eFm4SQ9fe_gORtWzjp6XiTbMeJLxn1l6fWRHixFSaRkRcCnEeNizFyWzPsjjG/exec';
+export const DEFAULT_SPREADSHEET_ID = '1BZl4MaFe-8F7dsH93NcJdKOAspWqJs3K5-dg5WT9z5c';
+export const DEFAULT_GAS_URL = 'https://script.google.com/macros/s/AKfycbwbYCjwP-9tN01QMxvixQ3b6PtASj8RslbyqG_jvhB8vndlMiSAZAafVdcVbEnTkSlZ/exec';
 
 const PREV_DEFAULT_SPREADSHEET_IDS = [
+  '1tEGcYctNnoyNTLjI1JZ_QWUuR6BU4DtnTvjLYM-Fn8M',
   '1Dv9vpvA_FFLwHBWX03DByx2ZqJ4wSzj0gFd5bceLDk0',
   '1YSDHUR9CYgLHPGtFVUxQeCgcH51GdR-P9fqehUUnMK4',
   '1LbXmt8Ve2TrnNRzcgpLWfcRaW1au2GHWG4LnCtupDT8',
 ];
 const PREV_DEFAULT_GAS_URLS = [
+  'https://script.google.com/macros/s/AKfycbxS5m7eFm4SQ9fe_gORtWzjp6XiTbMeJLxn1l6fWRHixFSaRkRcCnEeNizFyWzPsjjG/exec',
   'https://script.google.com/macros/s/AKfycbznlogqDRzhnwbHx3c7_TxEV-YOYvSjYHZGQjCFQIpKq-WNp2t0ZkCCqT52ZLw29TAZ/exec',
   'https://script.google.com/macros/s/AKfycbylrwIAEjAIaanInaZqv4vp_SnLLTe3bflxmBxN9gF4ocEY0GYTzWvrj6SWSbSCg9Vj/exec',
   'https://script.google.com/macros/s/AKfycbx9JoUcWeUq7JxS6Ab1MY0Bu4lbrZdxC1RmSy9rYzVPqJQfqQDkwkZ9mEiXJNBLBRC2Jg/exec',
@@ -734,15 +736,22 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
     );
 
-    // Listen for Notifications from Firestore
+    // Listen for Notifications from Firestore (only unread ones should be shown)
     const unsubNotifs = onSnapshot(
       collection(db, 'notifications'),
       (snapshot) => {
         if (!snapshot.empty) {
           const list: AppNotification[] = [];
-          snapshot.forEach((d) => list.push(d.data() as AppNotification));
+          snapshot.forEach((d) => {
+            const notif = d.data() as AppNotification;
+            if (!notif.read) {
+              list.push(notif);
+            }
+          });
           list.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
           setNotifications(list);
+        } else {
+          setNotifications([]);
         }
       },
       (error) => {
@@ -882,6 +891,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       await setDoc(doc(db, 'notifications', notif.id), sanitizeForFirestore(notif));
     } catch (err) {
       console.warn('Firestore sync notif error:', err);
+    }
+  };
+
+  const removeNotifFromFirestore = async (id: string) => {
+    try {
+      await deleteDoc(doc(db, 'notifications', id));
+    } catch (err) {
+      console.warn('Firestore remove notif error:', err);
     }
   };
 
@@ -1915,24 +1932,27 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const markNotificationRead = (id: string) => {
-    setNotifications((prev) =>
-      prev.map((n) => (n.id === id ? { ...n, read: true } : n))
-    );
+    setNotifications((prev) => prev.filter((n) => n.id !== id));
+    removeNotifFromFirestore(id);
   };
 
   const markAllNotificationsRead = () => {
-    setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
+    notifications.forEach((n) => removeNotifFromFirestore(n.id));
+    setNotifications([]);
   };
 
   const deleteNotification = (id: string) => {
     setNotifications((prev) => prev.filter((n) => n.id !== id));
+    removeNotifFromFirestore(id);
   };
 
   const clearReadNotifications = () => {
+    notifications.filter((n) => n.read).forEach((n) => removeNotifFromFirestore(n.id));
     setNotifications((prev) => prev.filter((n) => !n.read));
   };
 
   const clearAllNotifications = () => {
+    notifications.forEach((n) => removeNotifFromFirestore(n.id));
     setNotifications([]);
   };
 
@@ -2157,6 +2177,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       pullFromGoogleSheets();
     }
   }, [spreadsheetId]);
+
+  // Push all data to Google Sheets when spreadsheetId or gasWebhookUrl is configured
+  useEffect(() => {
+    if (autoSyncEnabled && spreadsheetId && gasWebhookUrl && questions.length > 0) {
+      syncWithGoogleSheets({ silent: true });
+    }
+  }, [spreadsheetId, gasWebhookUrl]);
 
   // Periodic auto-sync every 60 seconds
   useEffect(() => {
