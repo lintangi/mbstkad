@@ -10,9 +10,50 @@ import {
   AlignmentType,
   BorderStyle,
   convertInchesToTwip,
+  ImageRun,
+  ExternalHyperlink,
 } from 'docx';
 import { saveAs } from 'file-saver';
 import { Question } from '../types';
+import { normalizeGoogleDriveImageUrl } from './googleDriveUtils';
+
+/**
+ * Helper to convert an image URL (Base64 data URI, HTTP URL, or local upload) into a Uint8Array
+ * for docx ImageRun embedding.
+ */
+async function fetchImageAsUint8Array(
+  url: string
+): Promise<{ data: Uint8Array; width: number; height: number } | null> {
+  try {
+    if (!url) return null;
+    const resolvedUrl = normalizeGoogleDriveImageUrl(url);
+
+    // 1. Base64 Data URI
+    if (resolvedUrl.startsWith('data:')) {
+      const parts = resolvedUrl.split(',');
+      if (parts.length < 2) return null;
+      const base64Str = parts[1];
+      const binaryStr = atob(base64Str);
+      const bytes = new Uint8Array(binaryStr.length);
+      for (let i = 0; i < binaryStr.length; i++) {
+        bytes[i] = binaryStr.charCodeAt(i);
+      }
+      return { data: bytes, width: 380, height: 220 };
+    }
+
+    // 2. Fetch via HTTP
+    const res = await fetch(resolvedUrl, { method: 'GET' });
+    if (!res.ok) return null;
+    const buffer = await res.arrayBuffer();
+    const bytes = new Uint8Array(buffer);
+    if (bytes.length === 0) return null;
+
+    return { data: bytes, width: 380, height: 220 };
+  } catch (err) {
+    console.warn('Unable to download image for Word embedding:', err);
+    return null;
+  }
+}
 
 export interface PacketExportInfo {
   id: string;
@@ -598,7 +639,8 @@ export async function exportQuestionsToWord(
   );
 
   // 6. LOOP QUESTIONS WITH SPECIFICATION TABLE & PROMPT
-  filtered.forEach((q, idx) => {
+  for (let idx = 0; idx < filtered.length; idx++) {
+    const q = filtered[idx];
     const questionNumber = idx + 1;
     const cleanPrompt = cleanTextForWord(q.prompt);
 
@@ -892,26 +934,67 @@ export async function exportQuestionsToWord(
       })
     );
 
-    // Render attachments info if available
+    // Render attachments info and embedded media images if available
     if (q.attachments && q.attachments.length > 0) {
-      q.attachments.forEach((att) => {
+      for (const att of q.attachments) {
+        if (att.url) {
+          const imgRes = await fetchImageAsUint8Array(att.url);
+          if (imgRes) {
+            docChildren.push(
+              new Paragraph({
+                spacing: { before: 60, after: 60 },
+                indent: { left: convertInchesToTwip(0.4) },
+                children: [
+                  new ImageRun({
+                    data: imgRes.data,
+                    transformation: {
+                      width: imgRes.width,
+                      height: imgRes.height,
+                    },
+                  }),
+                ],
+              })
+            );
+          }
+        }
+
         docChildren.push(
           new Paragraph({
-            spacing: { before: 30, after: 40 },
+            spacing: { before: 30, after: 80 },
             indent: { left: convertInchesToTwip(0.4) },
             children: [
               new TextRun({
-                text: `[Lampiran Gambar/Media: ${att.name}${att.size ? ` - ${att.size}` : ''}]`,
+                text: `📁 [Lampiran Gambar/Media: ${att.name}${att.size ? ` - ${att.size}` : ''}]  `,
                 italics: true,
+                bold: true,
+                size: 19,
+                font: 'Calibri',
+                color: '0F172A',
+              }),
+              new TextRun({
+                text: 'Tautan File: ',
                 bold: true,
                 size: 19,
                 font: 'Calibri',
                 color: '1D4ED8',
               }),
+              new ExternalHyperlink({
+                children: [
+                  new TextRun({
+                    text: att.url,
+                    style: 'Hyperlink',
+                    size: 19,
+                    font: 'Calibri',
+                    color: '1D4ED8',
+                    underline: {},
+                  }),
+                ],
+                link: att.url,
+              }),
             ],
           })
         );
-      });
+      }
     }
 
     // Options for Pilihan Ganda & Pilihan Ganda Kompleks
@@ -1093,7 +1176,7 @@ export async function exportQuestionsToWord(
         })
       );
     }
-  });
+  }
 
   // 7. SEPARATE END ANSWER KEY SECTION (If requested)
   if (config.answerKeyMode === 'end_section' && config.includeAnswerKey) {

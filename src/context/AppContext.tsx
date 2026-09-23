@@ -147,6 +147,9 @@ interface AppContextType {
   // Notification Actions
   markNotificationRead: (id: string) => void;
   markAllNotificationsRead: () => void;
+  deleteNotification: (id: string) => void;
+  clearReadNotifications: () => void;
+  clearAllNotifications: () => void;
   
   // GAS & Sheets Integration State
   spreadsheetId: string;
@@ -192,7 +195,7 @@ const STORAGE_KEY_SPREADSHEET_ID = 'tkad_spreadsheet_id_v3';
 const STORAGE_KEY_AUTOSYNC = 'tkad_autosync_v3';
 
 export const DEFAULT_SPREADSHEET_ID = '1tEGcYctNnoyNTLjI1JZ_QWUuR6BU4DtnTvjLYM-Fn8M';
-export const DEFAULT_GAS_URL = 'https://script.google.com%2Fmacros%2Fs%2FAKfycbxS5m7eFm4SQ9fe_gORtWzjp6XiTbMeJLxn1l6fWRHixFSaRkRcCnEeNizFyWzPsjjG%2Fexec';
+export const DEFAULT_GAS_URL = 'https://script.google.com/macros/s/AKfycbxS5m7eFm4SQ9fe_gORtWzjp6XiTbMeJLxn1l6fWRHixFSaRkRcCnEeNizFyWzPsjjG/exec';
 
 const PREV_DEFAULT_SPREADSHEET_IDS = [
   '1Dv9vpvA_FFLwHBWX03DByx2ZqJ4wSzj0gFd5bceLDk0',
@@ -1921,6 +1924,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
   };
 
+  const deleteNotification = (id: string) => {
+    setNotifications((prev) => prev.filter((n) => n.id !== id));
+  };
+
+  const clearReadNotifications = () => {
+    setNotifications((prev) => prev.filter((n) => !n.read));
+  };
+
+  const clearAllNotifications = () => {
+    setNotifications([]);
+  };
+
   const pullFromGoogleSheets = async (): Promise<{ success: boolean; message: string; count?: number }> => {
     if (!spreadsheetId) {
       return { success: false, message: 'ID Spreadsheet belum ditentukan.' };
@@ -2723,6 +2738,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         restoreFullSystemBackup,
         markNotificationRead,
         markAllNotificationsRead,
+        deleteNotification,
+        clearReadNotifications,
+        clearAllNotifications,
         spreadsheetId,
         setSpreadsheetId,
         autoSyncEnabled,

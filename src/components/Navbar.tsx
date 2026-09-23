@@ -16,6 +16,8 @@ import {
   Plus,
   PanelLeft,
   KeyRound,
+  Trash2,
+  CheckCheck,
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { AppTab } from '../types';
@@ -27,6 +29,9 @@ export const Navbar: React.FC = () => {
     notifications,
     markNotificationRead,
     markAllNotificationsRead,
+    deleteNotification,
+    clearReadNotifications,
+    clearAllNotifications,
     activeTab,
     setActiveTab,
     getAllowedTabs,
@@ -105,7 +110,7 @@ export const Navbar: React.FC = () => {
                 title={`Basis data default: Spreadsheet ID ${spreadsheetId} (Otomatis Sinkron Aktif)`}
               >
                 <Database className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
-                <span>Auto-Sync Sheets</span>
+                <span>Online</span>
                 <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
                 {lastGasSyncTime && (
                   <span className="text-[10px] text-emerald-600/80 dark:text-emerald-400/80">({lastGasSyncTime})</span>
@@ -135,21 +140,33 @@ export const Navbar: React.FC = () => {
                       <h4 className="font-semibold text-slate-800 dark:text-white text-sm">Notifikasi Alur Kerja</h4>
                       <p className="text-xs text-slate-500 dark:text-slate-400">{unreadCount} belum dibaca</p>
                     </div>
-                    {unreadCount > 0 && (
-                      <button
-                        onClick={markAllNotificationsRead}
-                        className="text-xs text-blue-600 dark:text-blue-400 hover:underline font-medium"
-                      >
-                        Tandai semua dibaca
-                      </button>
-                    )}
+                    <div className="flex items-center space-x-2 text-[11px]">
+                      {unreadCount > 0 && (
+                        <button
+                          onClick={markAllNotificationsRead}
+                          className="text-blue-600 dark:text-blue-400 hover:underline font-medium"
+                          title="Tandai semua notifikasi sebagai sudah dibaca"
+                        >
+                          Tandai dibaca
+                        </button>
+                      )}
+                      {notifications.some((n) => n.read) && (
+                        <button
+                          onClick={clearReadNotifications}
+                          className="text-rose-600 dark:text-rose-400 hover:underline font-medium"
+                          title="Hapus semua notifikasi yang sudah dibaca"
+                        >
+                          Hapus terbaca
+                        </button>
+                      )}
+                    </div>
                   </div>
 
                   <div className="max-h-80 overflow-y-auto divide-y divide-slate-100 dark:divide-slate-800">
                     {notifications.length === 0 ? (
                       <div className="py-8 text-center text-slate-400 dark:text-slate-500 text-xs">Belum ada notifikasi</div>
                     ) : (
-                      notifications.slice(0, 10).map((notif) => (
+                      notifications.map((notif) => (
                         <div
                           key={notif.id}
                           onClick={() => {
@@ -159,29 +176,57 @@ export const Navbar: React.FC = () => {
                             }
                             setShowNotifs(false);
                           }}
-                          className={`p-3 text-xs cursor-pointer transition flex items-start space-x-3 ${
+                          className={`p-3 text-xs cursor-pointer transition flex items-start justify-between space-x-3 group ${
                             notif.read
                               ? 'bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800/60'
                               : 'bg-blue-50/60 dark:bg-blue-950/40 hover:bg-blue-50 dark:hover:bg-blue-950/60'
                           }`}
                         >
-                          <div className="mt-0.5 shrink-0">
-                            {notif.type === 'success' && <CheckCircle2 className="w-4 h-4 text-emerald-500" />}
-                            {notif.type === 'warning' && <ShieldAlert className="w-4 h-4 text-amber-500" />}
-                            {notif.type === 'info' && <Bell className="w-4 h-4 text-blue-500" />}
-                            {notif.type === 'error' && <ShieldAlert className="w-4 h-4 text-rose-500" />}
+                          <div className="flex items-start space-x-3 min-w-0 flex-1">
+                            <div className="mt-0.5 shrink-0">
+                              {notif.type === 'success' && <CheckCircle2 className="w-4 h-4 text-emerald-500" />}
+                              {notif.type === 'warning' && <ShieldAlert className="w-4 h-4 text-amber-500" />}
+                              {notif.type === 'info' && <Bell className="w-4 h-4 text-blue-500" />}
+                              {notif.type === 'error' && <ShieldAlert className="w-4 h-4 text-rose-500" />}
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <p className="font-semibold text-slate-800 dark:text-white truncate">{notif.title}</p>
+                              <p className="text-slate-600 dark:text-slate-300 text-[11px] mt-0.5 line-clamp-2">{notif.message}</p>
+                              <span className="text-[10px] text-slate-400 dark:text-slate-500 mt-1 block">
+                                {new Date(notif.timestamp).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })} • {new Date(notif.timestamp).toLocaleDateString('id-ID')}
+                              </span>
+                            </div>
                           </div>
-                          <div className="flex-1 min-w-0">
-                            <p className="font-semibold text-slate-800 dark:text-white truncate">{notif.title}</p>
-                            <p className="text-slate-600 dark:text-slate-300 text-[11px] mt-0.5 line-clamp-2">{notif.message}</p>
-                            <span className="text-[10px] text-slate-400 dark:text-slate-500 mt-1 block">
-                              {new Date(notif.timestamp).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })} • {new Date(notif.timestamp).toLocaleDateString('id-ID')}
-                            </span>
+                          
+                          {/* Hapus per notifikasi / Hapus setelah dibaca */}
+                          <div className="flex flex-col items-end justify-between space-y-1">
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                deleteNotification(notif.id);
+                              }}
+                              className="p-1 rounded-md text-slate-300 dark:text-slate-600 hover:text-rose-600 dark:hover:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/50 transition cursor-pointer"
+                              title="Hapus notifikasi ini"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
                           </div>
                         </div>
                       ))
                     )}
                   </div>
+                  {notifications.length > 0 && (
+                    <div className="px-4 pt-2 border-t border-slate-100 dark:border-slate-800/80 flex items-center justify-between text-[11px]">
+                      <span className="text-slate-400 dark:text-slate-500">Total: {notifications.length} notifikasi</span>
+                      <button
+                        onClick={clearAllNotifications}
+                        className="text-rose-600 dark:text-rose-400 hover:underline font-semibold"
+                      >
+                        Hapus Semua Notifikasi
+                      </button>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
