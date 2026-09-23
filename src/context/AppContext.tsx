@@ -13,7 +13,9 @@ import {
   DifficultyLevel,
   ChoiceOption,
   QuestionPacket,
+  QuestionAttachment,
 } from '../types';
+import { extractDriveFileId } from '../utils/googleDriveUtils';
 import {
   INITIAL_QUESTIONS,
   INITIAL_USERS,
@@ -194,16 +196,19 @@ const STORAGE_KEY_GAS_URL = 'tkad_gas_url_v3';
 const STORAGE_KEY_SPREADSHEET_ID = 'tkad_spreadsheet_id_v3';
 const STORAGE_KEY_AUTOSYNC = 'tkad_autosync_v3';
 
-export const DEFAULT_SPREADSHEET_ID = '1BZl4MaFe-8F7dsH93NcJdKOAspWqJs3K5-dg5WT9z5c';
-export const DEFAULT_GAS_URL = 'https://script.google.com/macros/s/AKfycbwfC-B6oyANDLB4LBRKVzgdX-emTiiFr98M9F8wFOCcNdr-fhsOBhXod3Jw-wmGHY9S/exec';
+export const DEFAULT_SPREADSHEET_ID = '1_x0C-IXWdcq9wCS2PyIPtOvqKRi4XSfaxomgIDPhQiM';
+export const DEFAULT_GAS_URL = 'https://script.google.com/macros/s/AKfycbwuzxjvozD_SCeCbLVnsBZzAbqYHpTk4XyBxZqYJAJaOe0bVrUYAikrRYsQ8oHOE5hH/exec';
 
 const PREV_DEFAULT_SPREADSHEET_IDS = [
+  '1BZl4MaFe-8F7dsH93NcJdKOAspWqJs3K5-dg5WT9z5c',
   '1tEGcYctNnoyNTLjI1JZ_QWUuR6BU4DtnTvjLYM-Fn8M',
   '1Dv9vpvA_FFLwHBWX03DByx2ZqJ4wSzj0gFd5bceLDk0',
   '1YSDHUR9CYgLHPGtFVUxQeCgcH51GdR-P9fqehUUnMK4',
   '1LbXmt8Ve2TrnNRzcgpLWfcRaW1au2GHWG4LnCtupDT8',
 ];
 const PREV_DEFAULT_GAS_URLS = [
+  'https://script.google.com/macros/s/AKfycbwfC-B6oyANDLB4LBRKVzgdX-emTiiFr98M9F8wFOCcNdr-fhsOBhXod3Jw-wmGHY9S/exec',
+  'https://script.google.com/macros/s/AKfycbwbYCjwP-9tN01QMxvixQ3b6PtASj8RslbyqG_jvhB8vndlMiSAZAafVdcVbEnTkSlZ/exec',
   'https://script.google.com/macros/s/AKfycbxS5m7eFm4SQ9fe_gORtWzjp6XiTbMeJLxn1l6fWRHixFSaRkRcCnEeNizFyWzPsjjG/exec',
   'https://script.google.com/macros/s/AKfycbznlogqDRzhnwbHx3c7_TxEV-YOYvSjYHZGQjCFQIpKq-WNp2t0ZkCCqT52ZLw29TAZ/exec',
   'https://script.google.com/macros/s/AKfycbylrwIAEjAIaanInaZqv4vp_SnLLTe3bflxmBxN9gF4ocEY0GYTzWvrj6SWSbSCg9Vj/exec',
@@ -229,8 +234,48 @@ function parseGvizTableToQuestions(table: any): Question[] {
     // Ignore header row if accidentally captured
     if (!id || id.toLowerCase() === 'id' || id.toLowerCase() === 'kode') return;
 
-    // Check Status_Data column (Col 13 or check if marked as TIDAK_AKTIF / DIHAPUS / TERGANTIKAN)
-    const statusData = getVal(13).trim().toUpperCase();
+    // Detect if sheet has 18 columns with lampiran_media at col 8, or legacy 17-column format
+    const val8 = getVal(8);
+    const val9 = getVal(9);
+    const is18ColFormat =
+      val8.includes('http') ||
+      val8.includes('drive.google') ||
+      val9.startsWith('[') ||
+      val9.startsWith('{') ||
+      (r.c.length >= 18 && !val8.startsWith('['));
+
+    let lampiranMediaStr = '';
+    let rawOptions = '';
+    let explanation = '';
+    let statusStr = '';
+    let version = '';
+    let createdByName = '';
+    let statusData = '';
+    let createdAt = '';
+    let updatedAt = '';
+
+    if (is18ColFormat) {
+      lampiranMediaStr = val8;
+      rawOptions = getVal(9);
+      explanation = getVal(10);
+      statusStr = (getVal(11) || 'disetujui').toLowerCase();
+      version = getVal(12) || '1.0';
+      createdByName = getVal(13) || 'Pengajar TKAD';
+      statusData = getVal(14).trim().toUpperCase();
+      createdAt = getVal(15) || new Date().toISOString();
+      updatedAt = getVal(16) || new Date().toISOString();
+    } else {
+      rawOptions = val8;
+      explanation = val9;
+      statusStr = (getVal(10) || 'disetujui').toLowerCase();
+      version = getVal(11) || '1.0';
+      createdByName = getVal(12) || 'Pengajar TKAD';
+      statusData = getVal(13).trim().toUpperCase();
+      createdAt = getVal(14) || new Date().toISOString();
+      updatedAt = getVal(15) || new Date().toISOString();
+    }
+
+    // Check Status_Data (TIDAK_AKTIF / DIHAPUS / TERGANTIKAN)
     if (statusData === 'TIDAK_AKTIF' || statusData === 'DIHAPUS' || statusData === 'TERGANTIKAN' || statusData === 'INACTIVE' || statusData === 'DELETED') {
       // Historical/replaced row - do NOT display in active application
       return;
@@ -249,7 +294,6 @@ function parseGvizTableToQuestions(table: any): Question[] {
     const prompt = getVal(7) || 'Soal';
 
     let options: ChoiceOption[] | undefined;
-    const rawOptions = getVal(8);
     if (rawOptions) {
       try {
         const parsed = JSON.parse(rawOptions);
@@ -259,17 +303,25 @@ function parseGvizTableToQuestions(table: any): Question[] {
       } catch {}
     }
 
-    const explanation = getVal(9);
-    const statusStr = (getVal(10) || 'disetujui').toLowerCase();
     const status = (['draft', 'menunggu_review', 'disetujui', 'perlu_revisi', 'ditolak'].includes(statusStr)
       ? statusStr
       : 'disetujui') as QuestionStatus;
-    const version = getVal(11) || '1.0';
-    const createdByName = getVal(12) || 'Pengajar TKAD';
-    
-    // Dates can be in col 14/15 (with status_data) or col 13/14 (legacy 15-col sheet)
-    const createdAt = (statusData === 'AKTIF' ? getVal(14) : getVal(13)) || new Date().toISOString();
-    const updatedAt = (statusData === 'AKTIF' ? getVal(15) : getVal(14)) || new Date().toISOString();
+
+    // Parse attachments from Google Drive links in lampiran_media
+    const attachments: QuestionAttachment[] = [];
+    if (lampiranMediaStr) {
+      const urls = lampiranMediaStr.split(/[\n|]+/).map((s) => s.trim()).filter(Boolean);
+      urls.forEach((url, uIdx) => {
+        const fileId = extractDriveFileId(url);
+        attachments.push({
+          id: `att-sync-${id}-${uIdx}`,
+          name: `Lampiran Media ${uIdx + 1}`,
+          url: fileId ? `https://drive.google.com/file/d/${fileId}/view?usp=sharing` : url,
+          type: 'image',
+          size: 'Google Drive',
+        });
+      });
+    }
 
     const qObj: Question = {
       id,
@@ -294,7 +346,7 @@ function parseGvizTableToQuestions(table: any): Question[] {
       createdAt,
       updatedAt,
       tags: [],
-      attachments: [],
+      attachments,
       reviews: [],
       versions: [],
     };

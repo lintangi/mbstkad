@@ -955,7 +955,7 @@ export async function exportQuestionsToWord(
                       width: imgRes.width,
                       height: imgRes.height,
                     },
-                  }),
+                  } as any),
                 ],
               })
             );

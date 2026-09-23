@@ -1,3 +1,4 @@
+import React from 'react';
 import { auth } from '../lib/firebase';
 import { signInWithPopup, GoogleAuthProvider } from 'firebase/auth';
 import { DEFAULT_GAS_URL } from '../context/AppContext';

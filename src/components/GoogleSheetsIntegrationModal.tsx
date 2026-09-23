@@ -97,7 +97,7 @@ const SHEET_NAMES = {
 
 const SOAL_HEADERS = [
   'ID', 'Kode', 'Subtes', 'Topik', 'Tipe', 'Kesulitan', 'Bobot_Skor',
-  'Teks_Soal', 'Link_Google_Drive_Lampiran', 'Kunci_Jawaban', 'Pembahasan', 'Status_Review', 'Versi', 
+  'Teks_Soal', 'lampiran_media', 'Kunci_Jawaban', 'Pembahasan', 'Status_Review', 'Versi', 
   'Penyusun', 'Status_Data', 'Dibuat_Pada', 'Diperbarui_Pada', 'Waktu_Sinkron'
 ];
 
@@ -106,9 +106,24 @@ function getDatabaseSpreadsheet(e) {
     if (e && e.parameter && e.parameter.spreadsheetId) {
       return SpreadsheetApp.openById(e.parameter.spreadsheetId);
     }
-    return SpreadsheetApp.openById(DEFAULT_SPREADSHEET_ID);
-  } catch (err) {
+    if (e && e.postData && e.postData.contents) {
+      try {
+        const body = JSON.parse(e.postData.contents);
+        if (body && body.spreadsheetId) {
+          return SpreadsheetApp.openById(body.spreadsheetId);
+        }
+      } catch (err) {}
+    }
+    if (DEFAULT_SPREADSHEET_ID && DEFAULT_SPREADSHEET_ID !== '') {
+      return SpreadsheetApp.openById(DEFAULT_SPREADSHEET_ID);
+    }
     return SpreadsheetApp.getActiveSpreadsheet();
+  } catch (err) {
+    try {
+      return SpreadsheetApp.getActiveSpreadsheet();
+    } catch (e2) {
+      throw new Error('Spreadsheet tidak dapat dibuka: ' + err.toString());
+    }
   }
 }
 
@@ -121,6 +136,13 @@ function doGet(e) {
     initDatabaseSheets(ss);
 
     const sheetSoal = ss.getSheetByName(SHEET_NAMES.SOAL);
+    if (!sheetSoal) {
+      return ContentService.createTextOutput(JSON.stringify({
+        status: 'error',
+        message: 'Lembar kerja ' + SHEET_NAMES.SOAL + ' tidak ditemukan.'
+      })).setMimeType(ContentService.MimeType.JSON);
+    }
+
     const rows = sheetSoal.getDataRange().getValues();
     
     if (rows.length <= 1) {
@@ -133,17 +155,16 @@ function doGet(e) {
 
     const headers = rows[0];
     const includeInactive = e && e.parameter && e.parameter.includeInactive === 'true';
-    const statusDataIdx = headers.indexOf('Status_Data');
+    const statusDataIdx = headers.indexOf('Status_Data') !== -1 ? headers.indexOf('Status_Data') : 14;
     
     const activeMap = new Map();
-    const data = [];
 
     for (let i = 1; i < rows.length; i++) {
       const row = rows[i];
       const id = row[0];
-      if (!id || String(id).toLowerCase() === 'id') continue;
+      if (!id || String(id).toLowerCase() === 'id' || String(id).toLowerCase() === 'kode') continue;
 
-      const statusDataVal = statusDataIdx !== -1 ? String(row[statusDataIdx]).trim().toUpperCase() : 'AKTIF';
+      const statusDataVal = String(row[statusDataIdx] !== undefined ? row[statusDataIdx] : 'AKTIF').trim().toUpperCase();
       
       // Jika includeInactive false, abaikan baris yang TIDAK_AKTIF / DIHAPUS / TERGANTIKAN
       if (!includeInactive && (statusDataVal === 'TIDAK_AKTIF' || statusDataVal === 'DIHAPUS' || statusDataVal === 'TERGANTIKAN')) {
@@ -180,12 +201,19 @@ function doGet(e) {
  */
 function doPost(e) {
   const lock = LockService.getScriptLock();
+  let hasLock = false;
   try {
-    lock.waitLock(30000);
+    hasLock = lock.tryLock(30000);
+    if (!hasLock) {
+      return ContentService.createTextOutput(JSON.stringify({
+        status: 'error',
+        message: 'Server Google Apps Script sedang sibuk mengunci database, silakan coba lagi.'
+      })).setMimeType(ContentService.MimeType.JSON);
+    }
   } catch (t) {
     return ContentService.createTextOutput(JSON.stringify({
       status: 'error',
-      message: 'Server Google Apps Script sedang sibuk mengunci database, silakan coba lagi.'
+      message: 'Gagal mengunci script: ' + t.toString()
     })).setMimeType(ContentService.MimeType.JSON);
   }
 
@@ -218,39 +246,65 @@ function doPost(e) {
 
       // Baca seluruh data baris yang sudah ada di sheet
       const existingDataRange = sheetSoal.getDataRange();
-      const existingValues = existingDataRange.getValues();
+      let existingValues = existingDataRange.getValues();
 
-      // Cari indeks kolom Status_Data, ID, dan Versi
-      let headers = existingValues[0] || [];
-      let statusDataColIndex = headers.indexOf('Status_Data');
-      
-      // Jika kolom Status_Data belum ada (misal versi lama sheet), upgrade header
-      if (statusDataColIndex === -1) {
-        sheetSoal.clearContents();
+      if (existingValues.length === 0 || (existingValues.length === 1 && !existingValues[0][0])) {
         sheetSoal.appendRow(SOAL_HEADERS);
         sheetSoal.getRange(1, 1, 1, SOAL_HEADERS.length).setFontWeight('bold').setBackground('#E2E8F0');
-        headers = SOAL_HEADERS;
-        statusDataColIndex = 13; // index 13 = kolom 14
+        existingValues = sheetSoal.getDataRange().getValues();
       }
 
+      let headers = existingValues[0] || [];
+
+      // Otomatis tambahkan kolom lampiran_media jika lembar kerja masih memakai format lama
+      if (headers.length > 0 && headers.indexOf('lampiran_media') === -1) {
+        const teksIdx = headers.indexOf('Teks_Soal');
+        if (teksIdx !== -1) {
+          sheetSoal.insertColumnAfter(teksIdx + 1);
+          sheetSoal.getRange(1, teksIdx + 2).setValue('lampiran_media').setFontWeight('bold').setBackground('#E2E8F0');
+          existingValues = sheetSoal.getDataRange().getValues();
+          headers = existingValues[0] || [];
+        }
+      }
+
+      // Otomatis tambahkan kolom Status_Data jika belum ada tanpa merusak data
+      if (headers.length > 0 && headers.indexOf('Status_Data') === -1) {
+        const nextCol = sheetSoal.getLastColumn() + 1;
+        sheetSoal.insertColumnAfter(sheetSoal.getLastColumn());
+        sheetSoal.getRange(1, nextCol).setValue('Status_Data').setFontWeight('bold').setBackground('#E2E8F0');
+        if (sheetSoal.getLastRow() > 1) {
+          sheetSoal.getRange(2, nextCol, sheetSoal.getLastRow() - 1, 1).setValue('AKTIF');
+        }
+        existingValues = sheetSoal.getDataRange().getValues();
+        headers = existingValues[0] || [];
+      }
+
+      // Cari indeks kolom secara dinamis berdasarkan header aktual di sheet
+      const idColIdx = headers.indexOf('ID') !== -1 ? headers.indexOf('ID') : 0;
+      const textColIdx = headers.indexOf('Teks_Soal') !== -1 ? headers.indexOf('Teks_Soal') : 7;
+      const mediaColIdx = headers.indexOf('lampiran_media') !== -1 ? headers.indexOf('lampiran_media') : 8;
+      const statusReviewColIdx = headers.indexOf('Status_Review') !== -1 ? headers.indexOf('Status_Review') : 11;
+      const versionColIdx = headers.indexOf('Versi') !== -1 ? headers.indexOf('Versi') : 12;
+      const statusDataColIndex = headers.indexOf('Status_Data') !== -1 ? headers.indexOf('Status_Data') : 14;
+
       // Pemetaan baris-baris aktif saat ini berdasarkan ID
-      // Map<QuestionID, Array<{ rowIndex: number, version: string, text: string }>>
       const activeRowsMap = new Map();
       for (let i = 1; i < existingValues.length; i++) {
         const row = existingValues[i];
-        const rowId = String(row[0]);
-        if (!rowId) continue;
+        const rowId = String(row[idColIdx] || '');
+        if (!rowId || rowId.toLowerCase() === 'id' || rowId.toLowerCase() === 'kode') continue;
         
-        const currentStatusData = String(row[statusDataColIndex] || 'AKTIF').trim().toUpperCase();
+        const currentStatusData = String(row[statusDataColIndex] !== undefined ? row[statusDataColIndex] : 'AKTIF').trim().toUpperCase();
         if (currentStatusData === 'AKTIF') {
           if (!activeRowsMap.has(rowId)) {
             activeRowsMap.set(rowId, []);
           }
           activeRowsMap.get(rowId).push({
             sheetRowNumber: i + 1, // 1-based index untuk SpreadsheetApp
-            version: String(row[11] || '1.0'),
-            text: String(row[7] || ''),
-            reviewStatus: String(row[10] || '')
+            version: String(row[versionColIdx] || '1.0'),
+            text: String(row[textColIdx] || ''),
+            media: String(row[mediaColIdx] || ''),
+            reviewStatus: String(row[statusReviewColIdx] || '')
           });
         }
       }
@@ -258,8 +312,13 @@ function doPost(e) {
       const rowsToAppend = [];
       const rowsToMarkInactive = [];
 
+      // Helper untuk normalisasi string versi
+      const normVer = function(v) {
+        return String(v || '').replace(/^v/i, '').trim();
+      };
+
       // 1. Proses setiap butir soal dari aplikasi
-      incomingQuestions.forEach(q => {
+      incomingQuestions.forEach(function(q) {
         const qId = String(q.id);
         let answerData = '';
         if (q.options) answerData = JSON.stringify(q.options);
@@ -268,24 +327,25 @@ function doPost(e) {
         else if (q.shortAnswerKey) answerData = q.shortAnswerKey;
         else if (q.essayRubric) answerData = q.essayRubric;
 
-        let driveLinks = q.driveAttachmentUrl || q.attachmentDriveLinks || '';
+        let driveLinks = q.lampiran_media || q.driveAttachmentUrl || q.attachmentDriveLinks || '';
         if (!driveLinks && q.attachments && q.attachments.length > 0) {
-          driveLinks = q.attachments.map(att => att.url).filter(Boolean).join('\n');
+          driveLinks = q.attachments.map(function(att) { return att.url; }).filter(Boolean).join('\\n');
         }
 
         const existingActiveEntries = activeRowsMap.get(qId);
 
         if (existingActiveEntries && existingActiveEntries.length > 0) {
           // Soal ini sudah pernah ada di sheet.
-          // Cek apakah ada perubahan versi, teks soal, atau status review
+          // Cek apakah ada perubahan versi, teks soal, link lampiran media, atau status review
           const latestEntry = existingActiveEntries[existingActiveEntries.length - 1];
-          const hasChanged = (latestEntry.version !== String(q.version)) || 
+          const hasChanged = (normVer(latestEntry.version) !== normVer(q.version)) || 
                              (latestEntry.text !== String(q.prompt)) || 
+                             (latestEntry.media !== String(driveLinks)) ||
                              (latestEntry.reviewStatus !== String(q.status));
 
           if (hasChanged) {
             // Tandai baris lama sebagai 'TIDAK_AKTIF'
-            existingActiveEntries.forEach(entry => {
+            existingActiveEntries.forEach(function(entry) {
               rowsToMarkInactive.push(entry.sheetRowNumber);
             });
 
@@ -337,29 +397,29 @@ function doPost(e) {
       });
 
       // 2. Tandai soal yang dihapus dari aplikasi sebagai 'TIDAK_AKTIF' / 'DIHAPUS'
-      deletedIds.forEach(delId => {
+      deletedIds.forEach(function(delId) {
         const activeEntries = activeRowsMap.get(String(delId));
         if (activeEntries) {
-          activeEntries.forEach(entry => {
+          activeEntries.forEach(function(entry) {
             rowsToMarkInactive.push(entry.sheetRowNumber);
           });
         }
       });
 
       // 3. Terapkan perubahan status 'TIDAK_AKTIF' pada baris-baris lama tanpa menghapus datanya
-      rowsToMarkInactive.forEach(rowNum => {
+      rowsToMarkInactive.forEach(function(rowNum) {
         sheetSoal.getRange(rowNum, statusDataColIndex + 1).setValue('TIDAK_AKTIF');
       });
 
       // 4. Tambahkan seluruh baris baru ke akhir sheet
-      rowsToAppend.forEach(row => {
+      rowsToAppend.forEach(function(row) {
         sheetSoal.appendRow(row);
       });
 
       // 5. Catat Versi Log Riwayat ke Sheet Versi_Log jika tersedia
       const sheetVersi = ss.getSheetByName(SHEET_NAMES.VERSI);
       if (sheetVersi) {
-        incomingQuestions.forEach(q => {
+        incomingQuestions.forEach(function(q) {
           if (q.versions && Array.isArray(q.versions) && q.versions.length > 0) {
             const latestVer = q.versions[q.versions.length - 1];
             sheetVersi.appendRow([
@@ -380,7 +440,7 @@ function doPost(e) {
       if (payload.auditLogs && Array.isArray(payload.auditLogs) && payload.auditLogs.length > 0) {
         const sheetAudit = ss.getSheetByName(SHEET_NAMES.AUDIT);
         if (sheetAudit) {
-          payload.auditLogs.slice(0, 30).forEach(log => {
+          payload.auditLogs.slice(0, 30).forEach(function(log) {
             sheetAudit.appendRow([
               log.id,
               log.timestamp,
@@ -404,7 +464,7 @@ function doPost(e) {
             if (userRows[u][2]) existingEmails.add(String(userRows[u][2]).toLowerCase());
           }
 
-          payload.users.forEach(u => {
+          payload.users.forEach(function(u) {
             if (!existingEmails.has(String(u.email).toLowerCase())) {
               sheetUsers.appendRow([
                 u.id,
@@ -446,11 +506,13 @@ function doPost(e) {
       const blob = Utilities.newBlob(decodedBytes, mimeType, fileName);
 
       const file = targetFolder.createFile(blob);
-      file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+      try {
+        file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+      } catch (shareErr) {}
 
       const fileId = file.getId();
       const directUrl = 'https://lh3.googleusercontent.com/d/' + fileId;
-      const viewUrl = file.getUrl();
+      const viewUrl = 'https://drive.google.com/file/d/' + fileId + '/view?usp=sharing';
 
       return ContentService.createTextOutput(JSON.stringify({
         status: 'success',
@@ -475,7 +537,11 @@ function doPost(e) {
       message: err.toString()
     })).setMimeType(ContentService.MimeType.JSON);
   } finally {
-    lock.releaseLock();
+    if (hasLock) {
+      try {
+        lock.releaseLock();
+      } catch (lockErr) {}
+    }
   }
 }
 
@@ -483,7 +549,7 @@ function doPost(e) {
  * Inisialisasi struktur sheet dan format kolom otomatis jika belum ada
  */
 function initDatabaseSheets(ss) {
-  Object.values(SHEET_NAMES).forEach(name => {
+  Object.values(SHEET_NAMES).forEach(function(name) {
     let s = ss.getSheetByName(name);
     if (!s) {
       s = ss.insertSheet(name);
@@ -499,6 +565,31 @@ function initDatabaseSheets(ss) {
       } else if (name === SHEET_NAMES.AUDIT) {
         s.appendRow(['ID_Log', 'Waktu', 'Pengguna', 'Peran', 'Aksi', 'Kode_Soal', 'Deskripsi']);
         s.getRange(1, 1, 1, 7).setFontWeight('bold').setBackground('#E2E8F0');
+      }
+    } else {
+      if (s.getLastRow() === 0) {
+        if (name === SHEET_NAMES.SOAL) {
+          s.appendRow(SOAL_HEADERS);
+          s.getRange(1, 1, 1, SOAL_HEADERS.length).setFontWeight('bold').setBackground('#E2E8F0');
+        } else if (name === SHEET_NAMES.USERS) {
+          s.appendRow(['ID', 'Nama_Lengkap', 'Email', 'Role', 'Departemen', 'Status', 'Inisial', 'Dibuat_Pada']);
+          s.getRange(1, 1, 1, 8).setFontWeight('bold').setBackground('#E2E8F0');
+        } else if (name === SHEET_NAMES.VERSI) {
+          s.appendRow(['ID_Log', 'ID_Soal', 'Kode_Soal', 'Versi', 'Waktu_Revisi', 'Diubah_Oleh', 'Ringkasan_Perubahan', 'Snapshot_Data']);
+          s.getRange(1, 1, 1, 8).setFontWeight('bold').setBackground('#E2E8F0');
+        } else if (name === SHEET_NAMES.AUDIT) {
+          s.appendRow(['ID_Log', 'Waktu', 'Pengguna', 'Peran', 'Aksi', 'Kode_Soal', 'Deskripsi']);
+          s.getRange(1, 1, 1, 7).setFontWeight('bold').setBackground('#E2E8F0');
+        }
+      } else if (name === SHEET_NAMES.SOAL && s.getLastRow() >= 1) {
+        const firstRow = s.getRange(1, 1, 1, s.getLastColumn()).getValues()[0];
+        if (firstRow.indexOf('lampiran_media') === -1) {
+          const teksIdx = firstRow.indexOf('Teks_Soal');
+          if (teksIdx !== -1) {
+            s.insertColumnAfter(teksIdx + 1);
+            s.getRange(1, teksIdx + 2).setValue('lampiran_media').setFontWeight('bold').setBackground('#E2E8F0');
+          }
+        }
       }
     }
   });
@@ -889,36 +980,39 @@ function initDatabaseSheets(ss) {
                 <span>Sheet 1: Soal_TKAD (Append-Only & Versi)</span>
               </h3>
               <span className="text-[11px] bg-emerald-50 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300 px-2 py-0.5 rounded font-semibold border border-emerald-200 dark:border-emerald-800">
-                17 Kolom
+                18 Kolom
               </span>
             </div>
 
             <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
-              Menyimpan seluruh riwayat butir soal secara append-only. Baris versi lama ditandai <code>TIDAK_AKTIF</code>, baris baru ditambahkan sebagai <code>AKTIF</code>.
+              Menyimpan seluruh butir soal beserta lampiran Google Drive secara append-only. Baris versi lama ditandai <code>TIDAK_AKTIF</code>, baris versi terbaru bertanda <code>AKTIF</code>.
             </p>
 
             <div className="space-y-1.5 text-xs">
               {[
                 { col: 'ID', desc: 'UUID unik butir soal (Primary Key)' },
                 { col: 'Kode', desc: 'Kode soal resmi (TKAD-BIN-101, dll)' },
-                { col: 'Subtes', desc: 'Bahasa Indonesia, Matematika, IPAS' },
-                { col: 'Topik', desc: 'Topik pokok bahasan' },
+                { col: 'Subtes', desc: 'Bahasa Indonesia, Matematika, IPAS, dll' },
+                { col: 'Topik', desc: 'Topik pokok bahasan soal' },
                 { col: 'Tipe', desc: 'pilihan_ganda, menjodohkan, benar_salah, isian, esai' },
                 { col: 'Kesulitan', desc: 'mudah | sedang | sulit' },
-                { col: 'Bobot_Skor', desc: 'Nilai poin butir soal' },
+                { col: 'Bobot_Skor', desc: 'Nilai bobot butir soal' },
                 { col: 'Teks_Soal', desc: 'Konten pertanyaan (KaTeX & Markdown)' },
-                { col: 'Kunci_Jawaban', desc: 'JSON array pilihan jawaban & kunci' },
+                { col: 'lampiran_media', desc: 'Link Google Drive file media lampiran (gambar/audio/diagram)' },
+                { col: 'Kunci_Jawaban', desc: 'JSON array pilihan jawaban & kunci skor' },
                 { col: 'Pembahasan', desc: 'Teks penjelasan jawaban' },
                 { col: 'Status_Review', desc: 'draft | menunggu_review | disetujui | perlu_revisi' },
                 { col: 'Versi', desc: 'Nomor versi (v1.0, v1.1, v2.0)' },
-                { col: 'Penyusun', desc: 'Nama guru pembuat soal' },
+                { col: 'Penyusun', desc: 'Nama guru pembuat soal (Relasi ke Pengguna_Sistem)' },
                 { col: 'Status_Data', desc: 'AKTIF (tampil di app) | TIDAK_AKTIF (arsip riwayat) | DIHAPUS' },
                 { col: 'Dibuat_Pada', desc: 'Timestamp pembuatan pertama kali' },
                 { col: 'Diperbarui_Pada', desc: 'Timestamp pembaruan versi terakhir' },
                 { col: 'Waktu_Sinkron', desc: 'Waktu sinkronisasi ke Google Sheets' },
               ].map((item, i) => (
                 <div key={i} className="flex items-start justify-between py-1 border-b border-slate-100 dark:border-slate-800">
-                  <span className="font-mono font-bold text-slate-800 dark:text-slate-200 shrink-0 mr-2">{item.col}</span>
+                  <span className={`font-mono font-bold shrink-0 mr-2 ${item.col === 'lampiran_media' ? 'text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/40 px-1 rounded' : 'text-slate-800 dark:text-slate-200'}`}>
+                    {item.col}
+                  </span>
                   <span className="text-slate-500 dark:text-slate-400 text-[11px] text-right">{item.desc}</span>
                 </div>
               ))}
@@ -943,7 +1037,7 @@ function initDatabaseSheets(ss) {
 
             <div className="space-y-1.5 text-xs">
               {[
-                { col: 'ID', desc: 'UUID unik pengguna' },
+                { col: 'ID', desc: 'UUID unik pengguna (Primary Key)' },
                 { col: 'Nama_Lengkap', desc: 'Nama guru/admin dengan gelar' },
                 { col: 'Email', desc: 'Alamat email terdaftar @tkad.adiwerna' },
                 { col: 'Role', desc: 'admin | reviewer | pembuat' },
@@ -978,14 +1072,14 @@ function initDatabaseSheets(ss) {
 
             <div className="space-y-1.5 text-xs">
               {[
-                { col: 'ID_Log', desc: 'ID unik pencatatan versi' },
-                { col: 'ID_Soal', desc: 'ID referensi butir soal' },
-                { col: 'Kode_Soal', desc: 'Kode butir soal' },
-                { col: 'Versi', desc: 'Nomor versi hasil revisi' },
+                { col: 'ID_Log', desc: 'ID unik pencatatan versi (Primary Key)' },
+                { col: 'ID_Soal', desc: 'ID referensi butir soal (Foreign Key -> Soal_TKAD.ID)' },
+                { col: 'Kode_Soal', desc: 'Kode butir soal (Foreign Key -> Soal_TKAD.Kode)' },
+                { col: 'Versi', desc: 'Nomor versi hasil revisi (v1.0, v1.1, dll)' },
                 { col: 'Waktu_Revisi', desc: 'Timestamp revisi dibuat' },
-                { col: 'Diubah_Oleh', desc: 'Nama penyusun / perevisi' },
+                { col: 'Diubah_Oleh', desc: 'Nama penyusun / perevisi (Relasi Pengguna_Sistem)' },
                 { col: 'Ringkasan_Perubahan', desc: 'Catatan ringkas revisi' },
-                { col: 'Snapshot_Data', desc: 'JSON snapshot teks & opsi soal' },
+                { col: 'Snapshot_Data', desc: 'JSON snapshot teks, opsi, dan kunci soal' },
               ].map((item, i) => (
                 <div key={i} className="flex items-start justify-between py-1 border-b border-slate-100 dark:border-slate-800">
                   <span className="font-mono font-bold text-slate-800 dark:text-slate-200 shrink-0 mr-2">{item.col}</span>
@@ -1013,19 +1107,166 @@ function initDatabaseSheets(ss) {
 
             <div className="space-y-1.5 text-xs">
               {[
-                { col: 'ID_Log', desc: 'ID unik log aktivitas' },
+                { col: 'ID_Log', desc: 'ID unik log aktivitas (Primary Key)' },
                 { col: 'Waktu', desc: 'Timestamp ISO 8601' },
-                { col: 'Pengguna', desc: 'Nama akun pelaksana aksi' },
+                { col: 'Pengguna', desc: 'Nama akun pelaksana aksi (Relasi Pengguna_Sistem)' },
                 { col: 'Peran', desc: 'admin | reviewer | pembuat' },
-                { col: 'Aksi', desc: 'Jenis tindakan (APPROVE, EDIT, PUSH, dll)' },
-                { col: 'Kode_Soal', desc: 'Referensi kode butir soal' },
-                { col: 'Deskripsi', desc: 'Uraian detail aktivitas' },
+                { col: 'Aksi', desc: 'Jenis tindakan (APPROVE, EDIT, PUSH, DELETE, dll)' },
+                { col: 'Kode_Soal', desc: 'Referensi kode butir soal (Relasi Soal_TKAD.Kode)' },
+                { col: 'Deskripsi', desc: 'Uraian detail aktivitas dan perubahan' },
               ].map((item, i) => (
                 <div key={i} className="flex items-start justify-between py-1 border-b border-slate-100 dark:border-slate-800">
                   <span className="font-mono font-bold text-slate-800 dark:text-slate-200 shrink-0 mr-2">{item.col}</span>
                   <span className="text-slate-500 dark:text-slate-400 text-[11px] text-right">{item.desc}</span>
                 </div>
               ))}
+            </div>
+          </div>
+
+          {/* Full Width Section: Relasi Antar Sheets & Arsitektur Data */}
+          <div className="md:col-span-2 bg-white dark:bg-slate-900 p-6 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xs space-y-5">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 dark:border-slate-800 pb-3">
+              <div>
+                <h3 className="font-bold text-slate-900 dark:text-white text-base flex items-center space-x-2">
+                  <Layers className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
+                  <span>Relasi Antar Sheets & Arsitektur Data Google Sheets</span>
+                </h3>
+                <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                  Diagram relasional (ERD) dan pemetaan kunci (Foreign Key) antar lembar kerja serta Google Drive Storage.
+                </p>
+              </div>
+              <span className="text-xs font-semibold px-2.5 py-1 rounded-full bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 shrink-0 self-start sm:self-auto">
+                Relasional & Non-Destructive
+              </span>
+            </div>
+
+            {/* Relational Cards */}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {/* Relasi 1 */}
+              <div className="p-4 rounded-xl bg-slate-50/70 dark:bg-slate-800/50 border border-slate-200/80 dark:border-slate-700/80 space-y-2">
+                <div className="flex items-center justify-between text-xs">
+                  <span className="font-bold text-slate-800 dark:text-slate-200 flex items-center space-x-1.5">
+                    <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
+                    <span>Penyusun & Penelaah</span>
+                  </span>
+                  <span className="text-[10px] font-mono font-semibold px-1.5 py-0.5 rounded bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300">
+                    Many-to-One
+                  </span>
+                </div>
+                <div className="text-xs font-mono bg-white dark:bg-slate-900 p-2 rounded-lg border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300">
+                  <span className="text-emerald-600 dark:text-emerald-400 font-bold">Soal_TKAD</span>.Penyusun
+                  <br />
+                  <span className="text-slate-400">└─► </span>
+                  <span className="text-purple-600 dark:text-purple-400 font-bold">Pengguna_Sistem</span>.Nama_Lengkap
+                </div>
+                <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-relaxed">
+                  Menghubungkan pembuat butir soal dengan profil akun terverifikasi dan hak akses role RBAC (admin, reviewer, pembuat).
+                </p>
+              </div>
+
+              {/* Relasi 2 */}
+              <div className="p-4 rounded-xl bg-slate-50/70 dark:bg-slate-800/50 border border-slate-200/80 dark:border-slate-700/80 space-y-2">
+                <div className="flex items-center justify-between text-xs">
+                  <span className="font-bold text-slate-800 dark:text-slate-200 flex items-center space-x-1.5">
+                    <span className="w-2 h-2 rounded-full bg-amber-500"></span>
+                    <span>Riwayat Revisi Soal</span>
+                  </span>
+                  <span className="text-[10px] font-mono font-semibold px-1.5 py-0.5 rounded bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300">
+                    One-to-Many
+                  </span>
+                </div>
+                <div className="text-xs font-mono bg-white dark:bg-slate-900 p-2 rounded-lg border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300">
+                  <span className="text-emerald-600 dark:text-emerald-400 font-bold">Soal_TKAD</span>.ID / Kode
+                  <br />
+                  <span className="text-slate-400">└─◄ </span>
+                  <span className="text-amber-600 dark:text-amber-400 font-bold">Versi_Log</span>.ID_Soal / Kode_Soal
+                </div>
+                <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-relaxed">
+                  Setiap butir soal memiliki rekam jejak revisi snapshot teks, opsi, dan nomor versi (v1.0, v1.1, v2.0) di lembar Versi_Log.
+                </p>
+              </div>
+
+              {/* Relasi 3 */}
+              <div className="p-4 rounded-xl bg-slate-50/70 dark:bg-slate-800/50 border border-slate-200/80 dark:border-slate-700/80 space-y-2">
+                <div className="flex items-center justify-between text-xs">
+                  <span className="font-bold text-slate-800 dark:text-slate-200 flex items-center space-x-1.5">
+                    <span className="w-2 h-2 rounded-full bg-blue-500"></span>
+                    <span>Audit Trail Butir Soal</span>
+                  </span>
+                  <span className="text-[10px] font-mono font-semibold px-1.5 py-0.5 rounded bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300">
+                    One-to-Many
+                  </span>
+                </div>
+                <div className="text-xs font-mono bg-white dark:bg-slate-900 p-2 rounded-lg border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300">
+                  <span className="text-emerald-600 dark:text-emerald-400 font-bold">Soal_TKAD</span>.Kode
+                  <br />
+                  <span className="text-slate-400">└─◄ </span>
+                  <span className="text-blue-600 dark:text-blue-400 font-bold">Audit_Trail</span>.Kode_Soal
+                </div>
+                <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-relaxed">
+                  Menyimpan log kronologis setiap penambahan, perbaikan, persetujuan review, atau penolakan butir soal.
+                </p>
+              </div>
+
+              {/* Relasi 4 */}
+              <div className="p-4 rounded-xl bg-slate-50/70 dark:bg-slate-800/50 border border-slate-200/80 dark:border-slate-700/80 space-y-2">
+                <div className="flex items-center justify-between text-xs">
+                  <span className="font-bold text-slate-800 dark:text-slate-200 flex items-center space-x-1.5">
+                    <span className="w-2 h-2 rounded-full bg-indigo-500"></span>
+                    <span>Akuntabilitas Audit</span>
+                  </span>
+                  <span className="text-[10px] font-mono font-semibold px-1.5 py-0.5 rounded bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300">
+                    One-to-Many
+                  </span>
+                </div>
+                <div className="text-xs font-mono bg-white dark:bg-slate-900 p-2 rounded-lg border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300">
+                  <span className="text-purple-600 dark:text-purple-400 font-bold">Pengguna_Sistem</span>.Nama_Lengkap
+                  <br />
+                  <span className="text-slate-400">└─◄ </span>
+                  <span className="text-blue-600 dark:text-blue-400 font-bold">Audit_Trail</span>.Pengguna
+                </div>
+                <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-relaxed">
+                  Memastikan nama dan peran pelaku aksi (admin, reviewer, pembuat) tercatat secara transparan pada log audit sistem.
+                </p>
+              </div>
+
+              {/* Relasi 5: lampiran_media -> Google Drive */}
+              <div className="p-4 rounded-xl bg-slate-50/70 dark:bg-slate-800/50 border border-slate-200/80 dark:border-slate-700/80 space-y-2 md:col-span-2 lg:col-span-2">
+                <div className="flex items-center justify-between text-xs">
+                  <span className="font-bold text-slate-800 dark:text-slate-200 flex items-center space-x-1.5">
+                    <span className="w-2 h-2 rounded-full bg-teal-500"></span>
+                    <span>Penyimpanan Media: Google Drive Storage</span>
+                  </span>
+                  <span className="text-[10px] font-mono font-semibold px-1.5 py-0.5 rounded bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-300">
+                    Drive Cloud Integration
+                  </span>
+                </div>
+                <div className="text-xs font-mono bg-white dark:bg-slate-900 p-2 rounded-lg border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <div>
+                    <span className="text-emerald-600 dark:text-emerald-400 font-bold">Soal_TKAD</span>.lampiran_media
+                    <br />
+                    <span className="text-slate-400">└─► </span>
+                    <span className="text-teal-600 dark:text-teal-400 font-bold">Google Drive Folder</span> (ID: <code>1Adx3ZBQrcOx_X2iWWzag05xsywaHyOoC</code>)
+                  </div>
+                  <span className="text-[10px] bg-slate-100 dark:bg-slate-800 px-2 py-1 rounded text-slate-600 dark:text-slate-400 shrink-0">
+                    Format: https://drive.google.com/file/d/{'{FILE_ID}'}/view?usp=sharing
+                  </span>
+                </div>
+                <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-relaxed">
+                  Berkas gambar, grafik stimulus, dan media audio disimpan di Google Drive khusus, dan URL publiknya dicatat di kolom <code>lampiran_media</code> pada sheet <code>Soal_TKAD</code>, sehingga lembar spreadsheet tetap ringan dan cepat dimuat.
+                </p>
+              </div>
+            </div>
+
+            {/* Note on Append-Only Architecture */}
+            <div className="p-4 rounded-xl bg-amber-50/70 dark:bg-amber-950/30 border border-amber-200/80 dark:border-amber-800/60 text-xs text-amber-900 dark:text-amber-200 space-y-1.5">
+              <p className="font-bold flex items-center space-x-1.5">
+                <AlertCircle className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0" />
+                <span>Prinsip Perlindungan Data (Append-Only Non-Destructive):</span>
+              </p>
+              <p className="text-[11px] leading-relaxed text-amber-800 dark:text-amber-300">
+                Aplikasi dan skrip Google Apps Script menerapkan prinsip <strong>Append-Only</strong>. Saat butir soal diperbarui, baris versi lama di Spreadsheet tidak pernah ditimpa atau dihapus, melainkan diberi nilai status kolom <code>Status_Data = 'TIDAK_AKTIF'</code> (arsip riwayat). Baris hasil revisi disisipkan di baris paling bawah dengan <code>Status_Data = 'AKTIF'</code>. Aplikasi secara cerdas hanya merender baris aktif.
+              </p>
             </div>
           </div>
         </div>
