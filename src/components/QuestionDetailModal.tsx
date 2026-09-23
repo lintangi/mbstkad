@@ -217,6 +217,9 @@ export const QuestionDetailModal: React.FC = () => {
                           <img
                             src={resolvedUrl}
                             alt={att.name}
+                            referrerPolicy="no-referrer"
+                            crossOrigin="anonymous"
+                            loading="lazy"
                             style={{ width: widthStyle }}
                             className={`max-h-80 rounded-lg border border-slate-200 dark:border-slate-700 object-contain shadow-2xs ${alignImgClass}`}
                             onError={(e) => handleDriveImageError(e, att.url)}
@@ -385,15 +388,12 @@ export const QuestionDetailModal: React.FC = () => {
                           <img
                             src={resolvedUrl}
                             alt={att.name}
+                            referrerPolicy="no-referrer"
+                            crossOrigin="anonymous"
+                            loading="lazy"
                             style={{ width: widthStyle }}
                             className={`max-h-80 rounded-lg border border-slate-700 object-contain shadow-md ${alignImgClass}`}
-                            onError={(e) => {
-                              const target = e.currentTarget;
-                              if (!target.dataset.triedFallback && att.url !== resolvedUrl) {
-                                target.dataset.triedFallback = 'true';
-                                target.src = att.url;
-                              }
-                            }}
+                            onError={(e) => handleDriveImageError(e, att.url)}
                           />
                           <span className="text-[11px] text-slate-400 mt-1 block italic">{att.name}</span>
                         </div>

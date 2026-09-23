@@ -24,6 +24,10 @@ export function extractDriveFileId(url: string): string | null {
   if (!url || typeof url !== 'string') return null;
   const trimmed = url.trim();
 
+  // Pattern 0: /api/drive-image?id=FILE_ID or /api/drive-proxy?id=FILE_ID
+  const matchApiProxy = trimmed.match(/\/api\/drive-(?:image|proxy)\?id=([a-zA-Z0-9_-]+)/);
+  if (matchApiProxy && matchApiProxy[1]) return matchApiProxy[1];
+
   // Pattern 1: /file/d/FILE_ID/
   const matchFileD = trimmed.match(/\/file\/d\/([a-zA-Z0-9_-]+)/);
   if (matchFileD && matchFileD[1]) return matchFileD[1];
@@ -71,8 +75,8 @@ export function normalizeGoogleDriveImageUrl(url: string): string {
 
   const fileId = extractDriveFileId(trimmed);
   if (fileId) {
-    // lh3.googleusercontent.com/d/FILE_ID is the primary high-performance direct embed endpoint
-    return `https://lh3.googleusercontent.com/d/${fileId}`;
+    // Direct Google Drive thumbnail CDN is accessible publicly without cookies when referrerpolicy=no-referrer is set
+    return `https://drive.google.com/thumbnail?id=${fileId}&sz=w1200`;
   }
 
   return trimmed;
@@ -93,11 +97,14 @@ export function getDriveImageFallbackUrls(url: string): string[] {
 
   const fileId = extractDriveFileId(trimmed);
   if (fileId) {
+    const origin = typeof window !== 'undefined' ? window.location.origin : '';
     return [
-      `https://lh3.googleusercontent.com/d/${fileId}`,
       `https://drive.google.com/thumbnail?id=${fileId}&sz=w1200`,
-      `https://docs.google.com/uc?export=view&id=${fileId}`,
+      `${origin}/api/drive-image?id=${fileId}`,
+      `https://lh3.googleusercontent.com/d/${fileId}`,
+      `https://lh3.googleusercontent.com/d/${fileId}=w1200`,
       `https://drive.google.com/uc?id=${fileId}&export=download`,
+      `https://docs.google.com/uc?export=view&id=${fileId}`,
       trimmed,
     ];
   }
@@ -106,7 +113,7 @@ export function getDriveImageFallbackUrls(url: string): string[] {
 
 /**
  * Automatic image error handler for React <img onError={...}> tags.
- * Seamlessly cycles through Google Drive direct embed, thumbnail, uc?export=view, and original URLs.
+ * Seamlessly cycles through Google Drive direct embed, thumbnail, server-side proxy, and original URLs.
  */
 export function handleDriveImageError(
   e: React.SyntheticEvent<HTMLImageElement, Event>,
@@ -119,6 +126,7 @@ export function handleDriveImageError(
   if (currentIndex + 1 < fallbacks.length) {
     const nextIndex = currentIndex + 1;
     img.dataset.fallbackIndex = String(nextIndex);
+    img.referrerPolicy = 'no-referrer';
     img.src = fallbacks[nextIndex];
   }
 }
@@ -175,7 +183,7 @@ export async function uploadMediaViaGasWebhook(
   }
 
   const fileId = result.fileId || extractDriveFileId(result.url || result.viewUrl);
-  const directEmbedUrl = fileId ? `https://lh3.googleusercontent.com/d/${fileId}` : result.url;
+  const directEmbedUrl = fileId ? `https://drive.google.com/thumbnail?id=${fileId}&sz=w1200` : result.url;
 
   return {
     fileId: fileId || undefined,

@@ -310,13 +310,13 @@ function parseGvizTableToQuestions(table: any): Question[] {
     // Parse attachments from Google Drive links in lampiran_media
     const attachments: QuestionAttachment[] = [];
     if (lampiranMediaStr) {
-      const urls = lampiranMediaStr.split(/[\n|]+/).map((s) => s.trim()).filter(Boolean);
+      const urls = lampiranMediaStr.split(/[\n|,;]+/).map((s) => s.trim()).filter(Boolean);
       urls.forEach((url, uIdx) => {
         const fileId = extractDriveFileId(url);
         attachments.push({
           id: `att-sync-${id}-${uIdx}`,
           name: `Lampiran Media ${uIdx + 1}`,
-          url: fileId ? `https://drive.google.com/file/d/${fileId}/view?usp=sharing` : url,
+          url: fileId ? `https://drive.google.com/thumbnail?id=${fileId}&sz=w1200` : url,
           type: 'image',
           size: 'Google Drive',
         });
@@ -2054,11 +2054,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
                   { v: item.Kesulitan || item.difficulty },
                   { v: item.Bobot_Skor || item.defaultScore },
                   { v: item.Teks_Soal || item.prompt },
+                  { v: item.lampiran_media || item.Lampiran_Media || item.driveAttachmentUrl || item.attachmentDriveLinks || '' },
                   { v: item.Kunci_Jawaban || (item.options ? JSON.stringify(item.options) : '') },
                   { v: item.Pembahasan || item.explanation },
-                  { v: item.Status || item.status },
+                  { v: item.Status_Review || item.Status || item.status },
                   { v: item.Versi || item.version },
                   { v: item.Penyusun || item.createdByName },
+                  { v: item.Status_Data || item.statusData || 'AKTIF' },
                   { v: item.Dibuat_Pada || item.createdAt },
                   { v: item.Diperbarui_Pada || item.updatedAt },
                 ],
@@ -2152,6 +2154,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
         return {
           ...q,
+          lampiran_media: driveLinks,
           driveAttachmentUrl: driveLinks,
           attachmentDriveLinks: driveLinks,
           attachmentNames: (q.attachments || []).map((a) => a.name).join(', '),

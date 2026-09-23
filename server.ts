@@ -69,6 +69,74 @@ async function startServer() {
     res.json({ status: "ok", time: new Date().toISOString() });
   });
 
+  // API: Drive Image Proxy (Enables cross-device image viewing without Google cookie/referrer restrictions)
+  app.get(["/api/drive-image", "/api/drive-proxy"], async (req, res) => {
+    try {
+      const fileIdParam = (req.query.id as string || "").trim();
+      const rawUrl = (req.query.url as string || "").trim();
+      
+      let targetId = fileIdParam;
+      if (!targetId && rawUrl) {
+        const matchFileD = rawUrl.match(/\/file\/d\/([a-zA-Z0-9_-]+)/);
+        const matchIdParam = rawUrl.match(/[?&]id=([a-zA-Z0-9_-]+)/);
+        const matchUserContent = rawUrl.match(/googleusercontent\.com\/d\/([a-zA-Z0-9_-]+)/);
+        const matchOpenId = rawUrl.match(/drive\.google\.com\/open\?id=([a-zA-Z0-9_-]+)/);
+        if (matchFileD && matchFileD[1]) targetId = matchFileD[1];
+        else if (matchIdParam && matchIdParam[1]) targetId = matchIdParam[1];
+        else if (matchUserContent && matchUserContent[1]) targetId = matchUserContent[1];
+        else if (matchOpenId && matchOpenId[1]) targetId = matchOpenId[1];
+        else if (/^[a-zA-Z0-9_-]{25,45}$/.test(rawUrl)) targetId = rawUrl;
+      }
+
+      if (!targetId) {
+        return res.status(400).send("Parameter id atau url Google Drive tidak valid.");
+      }
+
+      // Candidate Google Drive image stream URLs
+      const driveCandidates = [
+        `https://drive.google.com/thumbnail?id=${targetId}&sz=w1600`,
+        `https://lh3.googleusercontent.com/d/${targetId}=w1600`,
+        `https://lh3.googleusercontent.com/d/${targetId}`,
+        `https://docs.google.com/uc?export=view&id=${targetId}`,
+        `https://drive.google.com/uc?id=${targetId}&export=download`,
+      ];
+
+      for (const candidateUrl of driveCandidates) {
+        try {
+          const driveRes = await fetch(candidateUrl, {
+            method: "GET",
+            headers: {
+              "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+              "Accept": "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
+            },
+            redirect: "follow",
+          });
+
+          if (driveRes.ok) {
+            const contentType = driveRes.headers.get("content-type") || "";
+            // Ensure response is actually an image (not HTML login or error page)
+            if (contentType.startsWith("image/")) {
+              const arrayBuffer = await driveRes.arrayBuffer();
+              const buffer = Buffer.from(arrayBuffer);
+
+              res.setHeader("Content-Type", contentType);
+              res.setHeader("Cache-Control", "public, max-age=604800, stale-while-revalidate=86400");
+              res.setHeader("Access-Control-Allow-Origin", "*");
+              return res.send(buffer);
+            }
+          }
+        } catch {
+          // Continue to next candidate
+        }
+      }
+
+      return res.status(404).send("Gambar Google Drive tidak dapat dimuat atau belum dibagikan secara publik.");
+    } catch (err: any) {
+      console.error("Error in /api/drive-image proxy:", err);
+      return res.status(500).send("Gagal memuat gambar dari Google Drive: " + err.message);
+    }
+  });
+
   // API: Get JSON Database
   app.get("/api/db/json", async (req, res) => {
     try {

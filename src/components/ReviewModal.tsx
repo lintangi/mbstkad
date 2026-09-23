@@ -124,6 +124,9 @@ export const ReviewModal: React.FC = () => {
                         <img
                           src={resolvedUrl}
                           alt={att.name}
+                          referrerPolicy="no-referrer"
+                          crossOrigin="anonymous"
+                          loading="lazy"
                           style={{ width: widthStyle }}
                           className={`max-h-72 object-contain rounded border border-slate-200 dark:border-slate-700 ${alignImgClass}`}
                           onError={(e) => handleDriveImageError(e, att.url)}

@@ -508,10 +508,14 @@ function doPost(e) {
       const file = targetFolder.createFile(blob);
       try {
         file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
-      } catch (shareErr) {}
+      } catch (shareErr) {
+        try {
+          file.setSharing(DriveApp.Access.ANYONE, DriveApp.Permission.VIEW);
+        } catch (shareErr2) {}
+      }
 
       const fileId = file.getId();
-      const directUrl = 'https://lh3.googleusercontent.com/d/' + fileId;
+      const directUrl = 'https://drive.google.com/thumbnail?id=' + fileId + '&sz=w1200';
       const viewUrl = 'https://drive.google.com/file/d/' + fileId + '/view?usp=sharing';
 
       return ContentService.createTextOutput(JSON.stringify({
