@@ -30,6 +30,7 @@ import {
   QuestionAttachment,
 } from '../types';
 import { LatexRenderer } from '../utils/latexParser';
+import { getDriveToken, uploadToGoogleDrive } from '../utils/googleDriveUtils';
 
 export const QuestionEditor: React.FC = () => {
   const {
@@ -134,62 +135,55 @@ export const QuestionEditor: React.FC = () => {
   const [uploadStatus, setUploadStatus] = useState('');
   const [uploadError, setUploadError] = useState<string | null>(null);
 
-  const handleDirectUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleDirectUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
     setIsUploading(true);
     setUploadProgress(0);
-    setUploadStatus('Menghubungkan ke Google Drive API...');
+    setUploadStatus('Menghubungkan & Mengautentikasi ke Google Drive...');
     setUploadError(null);
 
-    const reader = new FileReader();
-    reader.onloadend = () => {
-      const base64Data = reader.result as string;
+    try {
+      // Step 1: Securely obtain token (either cached or via prompt/popup)
+      const token = await getDriveToken();
+      
+      setUploadProgress(35);
+      setUploadStatus(`Mengunggah "${file.name}" (${(file.size / 1024).toFixed(1)} KB)...`);
 
-      let currentProgress = 0;
-      const interval = setInterval(() => {
-        currentProgress += Math.floor(Math.random() * 15) + 5;
-        if (currentProgress >= 100) {
-          currentProgress = 100;
-          clearInterval(interval);
+      // Step 2: Upload file directly using Google Drive v3 REST API
+      const result = await uploadToGoogleDrive(file, token);
 
-          const newId = `att-${Date.now()}`;
-          const newAtt: QuestionAttachment = {
-            id: newId,
-            name: file.name,
-            type: file.type.startsWith('video') ? 'document' : file.type.startsWith('audio') ? 'audio' : 'image',
-            url: base64Data,
-            size: `${(file.size / 1024).toFixed(1)} KB`,
-          };
+      setUploadProgress(85);
+      setUploadStatus('Mengatur hak akses file & sinkronisasi eksternal...');
 
-          setAttachments((prev) => [...prev, newAtt]);
-          setIsUploading(false);
-          setUploadProgress(0);
-          setUploadStatus('');
-          // Reset file input value
-          e.target.value = '';
-        } else {
-          setUploadProgress(currentProgress);
-          if (currentProgress < 25) {
-            setUploadStatus('Menghubungkan ke folder Google Drive TKAD Adiwerna...');
-          } else if (currentProgress < 50) {
-            setUploadStatus('Mengautentikasi kredensial Google Workspace...');
-          } else if (currentProgress < 85) {
-            setUploadStatus(`Mengunggah berkas "${file.name}" (${(file.size / 1024).toFixed(1)} KB)...`);
-          } else {
-            setUploadStatus('Menyelesaikan transmisi file & sinkronisasi hak akses folder...');
-          }
-        }
-      }, 200);
-    };
+      // Step 3: Register successfully created file as a question attachment
+      const newId = `att-${Date.now()}`;
+      const newAtt: QuestionAttachment = {
+        id: newId,
+        name: result.name,
+        type: file.type.startsWith('video') ? 'document' : file.type.startsWith('audio') ? 'audio' : 'image',
+        url: result.url,
+        size: result.size,
+      };
 
-    reader.onerror = () => {
-      setUploadError('Gagal membaca berkas dari perangkat Anda.');
+      setAttachments((prev) => [...prev, newAtt]);
+      setUploadProgress(100);
+      setUploadStatus('Berkas berhasil terunggah ke Google Drive!');
+      
+      setTimeout(() => {
+        setIsUploading(false);
+        setUploadProgress(0);
+        setUploadStatus('');
+      }, 1500);
+    } catch (err: any) {
+      console.error('Google Drive Upload Error:', err);
+      setUploadError(err.message || 'Gagal mengunggah file ke Google Drive. Pastikan Anda menyetujui izin akses.');
       setIsUploading(false);
-    };
-
-    reader.readAsDataURL(file);
+    } finally {
+      // Reset input element value to allow uploading same file again
+      e.target.value = '';
+    }
   };
 
   // Sync subtest when user role/department changes
