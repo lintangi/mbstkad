@@ -422,6 +422,40 @@ function doPost(e) {
       })).setMimeType(ContentService.MimeType.JSON);
     }
 
+    if (action === 'UPLOAD_MEDIA' || action === 'UPLOAD_FILE') {
+      const folderId = payload.folderId || '1Adx3ZBQrcOx_X2iWWzag05xsywaHyOoC';
+      let targetFolder;
+      try {
+        targetFolder = DriveApp.getFolderById(folderId);
+      } catch (fErr) {
+        targetFolder = DriveApp.getRootFolder();
+      }
+
+      const rawBase64 = (payload.base64 || '').replace(/^data:.*?;base64,/, '');
+      const decodedBytes = Utilities.base64Decode(rawBase64);
+      const mimeType = payload.filetype || 'image/png';
+      const fileName = payload.filename || ('media_' + Date.now() + '.png');
+      const blob = Utilities.newBlob(decodedBytes, mimeType, fileName);
+
+      const file = targetFolder.createFile(blob);
+      file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+
+      const fileId = file.getId();
+      const directUrl = 'https://lh3.googleusercontent.com/d/' + fileId;
+      const viewUrl = file.getUrl();
+
+      return ContentService.createTextOutput(JSON.stringify({
+        status: 'success',
+        success: true,
+        fileId: fileId,
+        name: file.getName(),
+        url: directUrl,
+        viewUrl: viewUrl,
+        size: (file.getSize() / 1024).toFixed(1) + ' KB',
+        timestamp: new Date().toISOString()
+      })).setMimeType(ContentService.MimeType.JSON);
+    }
+
     return ContentService.createTextOutput(JSON.stringify({
       status: 'error',
       message: 'Aksi tidak dikenal: ' + action

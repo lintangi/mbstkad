@@ -30,7 +30,13 @@ import {
   QuestionAttachment,
 } from '../types';
 import { LatexRenderer } from '../utils/latexParser';
-import { getDriveToken, uploadToGoogleDrive } from '../utils/googleDriveUtils';
+import {
+  uploadMediaToDriveOrFallback,
+  normalizeGoogleDriveImageUrl,
+  extractDriveFileId,
+  TKAD_DRIVE_FOLDER_URL,
+  TKAD_DRIVE_FOLDER_ID,
+} from '../utils/googleDriveUtils';
 
 export const QuestionEditor: React.FC = () => {
   const {
@@ -44,6 +50,7 @@ export const QuestionEditor: React.FC = () => {
     currentUser,
     getUserDepartmentCategory,
     canUserEditQuestion,
+    gasWebhookUrl,
   } = useApp();
 
   const editingQuestion = editingQuestionId
@@ -139,10 +146,10 @@ export const QuestionEditor: React.FC = () => {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    // Limit upload file size to 10MB
-    const maxSizeBytes = 10 * 1024 * 1024; // 10MB
+    // Limit upload file size to 15MB
+    const maxSizeBytes = 15 * 1024 * 1024;
     if (file.size > maxSizeBytes) {
-      setUploadError(`Ukuran berkas (${(file.size / 1024 / 1024).toFixed(2)} MB) melebihi batas maksimum 10 MB.`);
+      setUploadError(`Ukuran berkas (${(file.size / 1024 / 1024).toFixed(2)} MB) melebihi batas maksimum 15 MB.`);
       setIsUploading(false);
       e.target.value = '';
       return;
@@ -153,69 +160,49 @@ export const QuestionEditor: React.FC = () => {
     setUploadStatus('Membaca berkas dari perangkat...');
     setUploadError(null);
 
-    const reader = new FileReader();
-    reader.onload = async () => {
-      try {
-        setUploadProgress(40);
-        setUploadStatus(`Mengunggah "${file.name}" (${(file.size / 1024).toFixed(1)} KB) ke server...`);
+    try {
+      const result = await uploadMediaToDriveOrFallback(
+        file,
+        (percent, statusText) => {
+          setUploadProgress(percent);
+          setUploadStatus(statusText);
+        },
+        { gasWebhookUrl: gasWebhookUrl || undefined, folderId: TKAD_DRIVE_FOLDER_ID }
+      );
 
-        const response = await fetch('/api/upload', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            filename: file.name,
-            filetype: file.type,
-            base64: reader.result as string,
-          }),
-        });
+      const newId = `att-${Date.now()}`;
+      const newAtt: QuestionAttachment = {
+        id: newId,
+        name: result.name,
+        type: file.type.startsWith('video') ? 'document' : file.type.startsWith('audio') ? 'audio' : 'image',
+        url: normalizeGoogleDriveImageUrl(result.url),
+        size: result.size,
+        width: 100, // default size percentage
+        align: 'center', // default alignment
+      };
 
-        if (!response.ok) {
-          const errData = await response.json().catch(() => ({ message: 'Gagal merespon dari server.' }));
-          throw new Error(errData.message || 'Gagal mengunggah berkas ke server.');
-        }
+      setAttachments((prev) => [...prev, newAtt]);
+      setUploadProgress(100);
+      setUploadStatus(
+        result.storageProvider === 'google_drive'
+          ? 'Berkas berhasil terunggah ke Google Drive (TKAD Adiwerna)!'
+          : result.storageProvider === 'server'
+          ? 'Berkas berhasil tersimpan di server media!'
+          : 'Berkas berhasil terlampir (Inline Media)!'
+      );
 
-        const result = await response.json();
-        setUploadProgress(90);
-        setUploadStatus('Menyelesaikan pemrosesan lampiran...');
-
-        // Register successfully created file as a question attachment
-        const newId = `att-${Date.now()}`;
-        const newAtt: QuestionAttachment = {
-          id: newId,
-          name: result.name,
-          type: file.type.startsWith('video') ? 'document' : file.type.startsWith('audio') ? 'audio' : 'image',
-          url: result.url,
-          size: result.size,
-          width: 100, // default size percentage
-          align: 'center', // default alignment
-        };
-
-        setAttachments((prev) => [...prev, newAtt]);
-        setUploadProgress(100);
-        setUploadStatus('Berkas berhasil terlampir dan siap dipratinjau!');
-
-        setTimeout(() => {
-          setIsUploading(false);
-          setUploadProgress(0);
-          setUploadStatus('');
-        }, 1500);
-      } catch (err: any) {
-        console.error('Upload Error:', err);
-        setUploadError(err.message || 'Gagal mengunggah file. Silakan coba lagi.');
+      setTimeout(() => {
         setIsUploading(false);
-      }
-    };
-
-    reader.onerror = () => {
-      setUploadError('Gagal membaca berkas dari perangkat Anda.');
+        setUploadProgress(0);
+        setUploadStatus('');
+      }, 2000);
+    } catch (err: any) {
+      console.error('Upload Error:', err);
+      setUploadError(err.message || 'Gagal mengunggah file. Silakan coba lagi.');
       setIsUploading(false);
-    };
-
-    reader.readAsDataURL(file);
-    // Reset input element value to allow uploading same file again
-    e.target.value = '';
+    } finally {
+      e.target.value = '';
+    }
   };
 
   // Sync subtest when user role/department changes
@@ -252,11 +239,19 @@ export const QuestionEditor: React.FC = () => {
 
   const handleAddAttachment = () => {
     if (!attachmentUrl.trim()) return;
+    const rawUrl = attachmentUrl.trim();
+    const normalizedUrl = normalizeGoogleDriveImageUrl(rawUrl);
+    const driveFileId = extractDriveFileId(rawUrl);
+
     const newAtt: QuestionAttachment = {
       id: `att-${Date.now()}`,
-      name: `Lampiran Gambar #${attachments.length + 1}`,
+      name: driveFileId
+        ? `Media Google Drive (${driveFileId.slice(0, 8)}...)`
+        : `Lampiran Gambar #${attachments.length + 1}`,
       type: 'image',
-      url: attachmentUrl.trim(),
+      url: normalizedUrl,
+      width: 100,
+      align: 'center',
     };
     setAttachments((prev) => [...prev, newAtt]);
     setAttachmentUrl('');

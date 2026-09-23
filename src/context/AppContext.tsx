@@ -192,7 +192,7 @@ const STORAGE_KEY_SPREADSHEET_ID = 'tkad_spreadsheet_id_v3';
 const STORAGE_KEY_AUTOSYNC = 'tkad_autosync_v3';
 
 export const DEFAULT_SPREADSHEET_ID = '1tEGcYctNnoyNTLjI1JZ_QWUuR6BU4DtnTvjLYM-Fn8M';
-export const DEFAULT_GAS_URL = 'https://script.google.com/macros/s/AKfycbxS5m7eFm4SQ9fe_gORtWzjp6XiTbMeJLxn1l6fWRHixFSaRkRcCnEeNizFyWzPsjjG/exec';
+export const DEFAULT_GAS_URL = 'https://script.google.com%2Fmacros%2Fs%2FAKfycbxS5m7eFm4SQ9fe_gORtWzjp6XiTbMeJLxn1l6fWRHixFSaRkRcCnEeNizFyWzPsjjG%2Fexec';
 
 const PREV_DEFAULT_SPREADSHEET_IDS = [
   '1Dv9vpvA_FFLwHBWX03DByx2ZqJ4wSzj0gFd5bceLDk0',

@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { LatexRenderer } from '../utils/latexParser';
+import { normalizeGoogleDriveImageUrl } from '../utils/googleDriveUtils';
 
 export const QuestionDetailModal: React.FC = () => {
   const {
@@ -209,14 +210,23 @@ export const QuestionDetailModal: React.FC = () => {
                         'mx-auto';
 
                       const widthStyle = att.width ? `${att.width}%` : '100%';
+                      const resolvedUrl = normalizeGoogleDriveImageUrl(att.url);
 
                       return (
                         <div key={att.id} className={alignClass}>
                           <img
-                            src={att.url}
+                            src={resolvedUrl}
                             alt={att.name}
                             style={{ width: widthStyle }}
                             className={`max-h-80 rounded-lg border border-slate-200 dark:border-slate-700 object-contain shadow-2xs ${alignImgClass}`}
+                            onError={(e) => {
+                              // If lh3 fails, fallback to standard drive view if drive ID exists
+                              const target = e.currentTarget;
+                              if (!target.dataset.triedFallback && att.url !== resolvedUrl) {
+                                target.dataset.triedFallback = 'true';
+                                target.src = att.url;
+                              }
+                            }}
                           />
                           <span className="text-[11px] text-slate-500 dark:text-slate-400 mt-1 block italic">{att.name}</span>
                         </div>
@@ -361,6 +371,43 @@ export const QuestionDetailModal: React.FC = () => {
               {/* Question Text */}
               <div className="text-slate-100 text-base leading-relaxed">
                 <LatexRenderer content={question.prompt} className="text-slate-100" />
+                {question.attachments && question.attachments.length > 0 && (
+                  <div className="mt-4 space-y-4">
+                    {question.attachments.map((att) => {
+                      const alignClass = 
+                        att.align === 'left' ? 'text-left' :
+                        att.align === 'right' ? 'text-right' :
+                        'text-center';
+
+                      const alignImgClass = 
+                        att.align === 'left' ? 'mr-auto ml-0' :
+                        att.align === 'right' ? 'ml-auto mr-0' :
+                        'mx-auto';
+
+                      const widthStyle = att.width ? `${att.width}%` : '100%';
+                      const resolvedUrl = normalizeGoogleDriveImageUrl(att.url);
+
+                      return (
+                        <div key={att.id} className={alignClass}>
+                          <img
+                            src={resolvedUrl}
+                            alt={att.name}
+                            style={{ width: widthStyle }}
+                            className={`max-h-80 rounded-lg border border-slate-700 object-contain shadow-md ${alignImgClass}`}
+                            onError={(e) => {
+                              const target = e.currentTarget;
+                              if (!target.dataset.triedFallback && att.url !== resolvedUrl) {
+                                target.dataset.triedFallback = 'true';
+                                target.src = att.url;
+                              }
+                            }}
+                          />
+                          <span className="text-[11px] text-slate-400 mt-1 block italic">{att.name}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
 
               {/* Exam Options */}
