@@ -25,6 +25,7 @@ import {
   Layers,
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
+import { extractDriveFileId } from '../utils/googleDriveUtils';
 import { Question, QuestionStatus, DifficultyLevel, QuestionType } from '../types';
 import { LatexRenderer } from '../utils/latexParser';
 import { WordExportModal } from './WordExportModal';
@@ -122,22 +123,36 @@ export const QuestionBankView: React.FC = () => {
       ? questions.filter((q) => selectedQuestionIds.includes(q.id))
       : filteredQuestions;
 
-    const headers = ['Kode Soal', 'Tipe', 'Subtes', 'Elemen', 'Sub Elemen', 'Kompetensi', 'Level Kognitif', 'Kesulitan', 'Skor', 'Status', 'Versi', 'Teks Soal', 'Penyusun'];
-    const rows = targetList.map((q) => [
-      `"${q.code}"`,
-      `"${q.type}"`,
-      `"${q.subtest}"`,
-      `"${q.element || q.topic}"`,
-      `"${q.subElement || ''}"`,
-      `"${q.competency || ''}"`,
-      `"${q.cognitiveLevel || ''}"`,
-      `"${q.difficulty}"`,
-      q.defaultScore,
-      `"${q.status}"`,
-      `"v${q.version}"`,
-      `"${q.prompt.replace(/"/g, '""').replace(/\n/g, ' ')}"`,
-      `"${q.createdByName}"`,
-    ]);
+    const headers = ['Kode Soal', 'Tipe', 'Subtes', 'Elemen', 'Sub Elemen', 'Kompetensi', 'Level Kognitif', 'Kesulitan', 'Skor', 'Status', 'Versi', 'Teks Soal', 'Link Google Drive Lampiran', 'Penyusun'];
+    const rows = targetList.map((q) => {
+      const driveLinks = (q.attachments || [])
+        .map((att) => {
+          const fileId = extractDriveFileId(att.url);
+          if (fileId) {
+            return `https://drive.google.com/file/d/${fileId}/view?usp=sharing`;
+          }
+          return att.url;
+        })
+        .filter(Boolean)
+        .join(' | ');
+
+      return [
+        `"${q.code}"`,
+        `"${q.type}"`,
+        `"${q.subtest}"`,
+        `"${q.element || q.topic}"`,
+        `"${q.subElement || ''}"`,
+        `"${q.competency || ''}"`,
+        `"${q.cognitiveLevel || ''}"`,
+        `"${q.difficulty}"`,
+        q.defaultScore,
+        `"${q.status}"`,
+        `"v${q.version}"`,
+        `"${q.prompt.replace(/"/g, '""').replace(/\n/g, ' ')}"`,
+        `"${driveLinks.replace(/"/g, '""')}"`,
+        `"${q.createdByName}"`,
+      ];
+    });
 
     const csvContent = 'data:text/csv;charset=utf-8,' + [headers.join(','), ...rows.map((e) => e.join(','))].join('\n');
     const encodedUri = encodeURI(csvContent);

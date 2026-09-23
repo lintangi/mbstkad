@@ -195,7 +195,7 @@ const STORAGE_KEY_SPREADSHEET_ID = 'tkad_spreadsheet_id_v3';
 const STORAGE_KEY_AUTOSYNC = 'tkad_autosync_v3';
 
 export const DEFAULT_SPREADSHEET_ID = '1BZl4MaFe-8F7dsH93NcJdKOAspWqJs3K5-dg5WT9z5c';
-export const DEFAULT_GAS_URL = 'https://script.google.com/macros/s/AKfycbwbYCjwP-9tN01QMxvixQ3b6PtASj8RslbyqG_jvhB8vndlMiSAZAafVdcVbEnTkSlZ/exec';
+export const DEFAULT_GAS_URL = 'https://script.google.com/macros/s/AKfycbwfC-B6oyANDLB4LBRKVzgdX-emTiiFr98M9F8wFOCcNdr-fhsOBhXod3Jw-wmGHY9S/exec';
 
 const PREV_DEFAULT_SPREADSHEET_IDS = [
   '1tEGcYctNnoyNTLjI1JZ_QWUuR6BU4DtnTvjLYM-Fn8M',
@@ -2086,10 +2086,30 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
 
     try {
+      const enrichedQuestions = questions.map((q) => {
+        const driveLinks = (q.attachments || [])
+          .map((att) => {
+            const fileId = extractDriveFileId(att.url);
+            if (fileId) {
+              return `https://drive.google.com/file/d/${fileId}/view?usp=sharing`;
+            }
+            return att.url;
+          })
+          .filter(Boolean)
+          .join('\n');
+
+        return {
+          ...q,
+          driveAttachmentUrl: driveLinks,
+          attachmentDriveLinks: driveLinks,
+          attachmentNames: (q.attachments || []).map((a) => a.name).join(', '),
+        };
+      });
+
       const payload = {
         action: 'SYNC_ALL',
         spreadsheetId,
-        questions,
+        questions: enrichedQuestions,
         users,
         deletedQuestionIds,
         auditLogs: auditLogs.slice(0, 30),

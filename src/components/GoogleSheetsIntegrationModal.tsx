@@ -18,6 +18,7 @@ import {
   CheckCircle2,
 } from 'lucide-react';
 import { useApp, DEFAULT_SPREADSHEET_ID, DEFAULT_GAS_URL } from '../context/AppContext';
+import { extractDriveFileId } from '../utils/googleDriveUtils';
 
 export const GoogleSheetsIntegrationModal: React.FC = () => {
   const {
@@ -96,7 +97,7 @@ const SHEET_NAMES = {
 
 const SOAL_HEADERS = [
   'ID', 'Kode', 'Subtes', 'Topik', 'Tipe', 'Kesulitan', 'Bobot_Skor',
-  'Teks_Soal', 'Kunci_Jawaban', 'Pembahasan', 'Status_Review', 'Versi', 
+  'Teks_Soal', 'Link_Google_Drive_Lampiran', 'Kunci_Jawaban', 'Pembahasan', 'Status_Review', 'Versi', 
   'Penyusun', 'Status_Data', 'Dibuat_Pada', 'Diperbarui_Pada', 'Waktu_Sinkron'
 ];
 
@@ -267,6 +268,11 @@ function doPost(e) {
         else if (q.shortAnswerKey) answerData = q.shortAnswerKey;
         else if (q.essayRubric) answerData = q.essayRubric;
 
+        let driveLinks = q.driveAttachmentUrl || q.attachmentDriveLinks || '';
+        if (!driveLinks && q.attachments && q.attachments.length > 0) {
+          driveLinks = q.attachments.map(att => att.url).filter(Boolean).join('\n');
+        }
+
         const existingActiveEntries = activeRowsMap.get(qId);
 
         if (existingActiveEntries && existingActiveEntries.length > 0) {
@@ -293,6 +299,7 @@ function doPost(e) {
               q.difficulty,
               q.defaultScore,
               q.prompt,
+              driveLinks,
               answerData,
               q.explanation || '',
               q.status,
@@ -315,6 +322,7 @@ function doPost(e) {
             q.difficulty,
             q.defaultScore,
             q.prompt,
+            driveLinks,
             answerData,
             q.explanation || '',
             q.status,
@@ -523,28 +531,39 @@ function initDatabaseSheets(ss) {
   const downloadStarterSheetsCSV = () => {
     const headers = [
       'ID', 'Kode', 'Subtes', 'Topik', 'Tipe', 'Kesulitan', 'Bobot_Skor',
-      'Teks_Soal', 'Kunci_Jawaban', 'Pembahasan', 'Status_Review', 'Versi', 
+      'Teks_Soal', 'lampiran_media', 'Kunci_Jawaban', 'Pembahasan', 'Status_Review', 'Versi', 
       'Penyusun', 'Status_Data', 'Dibuat_Pada', 'Diperbarui_Pada', 'Waktu_Sinkron'
     ];
-    const rows = questions.map((q) => [
-      `"${q.id}"`,
-      `"${q.code}"`,
-      `"${q.subtest}"`,
-      `"${q.topic}"`,
-      `"${q.type}"`,
-      `"${q.difficulty}"`,
-      q.defaultScore,
-      `"${q.prompt.replace(/"/g, '""')}"`,
-      `"${JSON.stringify(q.options || []).replace(/"/g, '""')}"`,
-      `"${(q.explanation || '').replace(/"/g, '""')}"`,
-      `"${q.status}"`,
-      `"${q.version}"`,
-      `"${q.createdByName}"`,
-      `"AKTIF"`,
-      `"${q.createdAt}"`,
-      `"${q.updatedAt}"`,
-      `"${new Date().toISOString()}"`,
-    ]);
+    const rows = questions.map((q) => {
+      const driveLinks = (q.attachments || [])
+        .map((att) => {
+          const fileId = extractDriveFileId(att.url);
+          return fileId ? `https://drive.google.com/file/d/${fileId}/view?usp=sharing` : att.url;
+        })
+        .filter(Boolean)
+        .join(' | ');
+
+      return [
+        `"${q.id}"`,
+        `"${q.code}"`,
+        `"${q.subtest}"`,
+        `"${q.topic}"`,
+        `"${q.type}"`,
+        `"${q.difficulty}"`,
+        q.defaultScore,
+        `"${q.prompt.replace(/"/g, '""')}"`,
+        `"${driveLinks.replace(/"/g, '""')}"`,
+        `"${JSON.stringify(q.options || []).replace(/"/g, '""')}"`,
+        `"${(q.explanation || '').replace(/"/g, '""')}"`,
+        `"${q.status}"`,
+        `"${q.version}"`,
+        `"${q.createdByName}"`,
+        `"AKTIF"`,
+        `"${q.createdAt}"`,
+        `"${q.updatedAt}"`,
+        `"${new Date().toISOString()}"`,
+      ];
+    });
 
     const csvContent = 'data:text/csv;charset=utf-8,' + [headers.join(','), ...rows.map((r) => r.join(','))].join('\n');
     const encoded = encodeURI(csvContent);

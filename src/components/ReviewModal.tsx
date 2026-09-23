@@ -15,6 +15,7 @@ import {
 import { useApp } from '../context/AppContext';
 import { ReviewCriteriaRating } from '../types';
 import { LatexRenderer } from '../utils/latexParser';
+import { normalizeGoogleDriveImageUrl, handleDriveImageError } from '../utils/googleDriveUtils';
 
 export const ReviewModal: React.FC = () => {
   const {
@@ -116,14 +117,16 @@ export const ReviewModal: React.FC = () => {
                       'mx-auto';
 
                     const widthStyle = att.width ? `${att.width}%` : '100%';
+                    const resolvedUrl = normalizeGoogleDriveImageUrl(att.url);
 
                     return (
                       <div key={att.id} className={alignClass}>
                         <img
-                          src={att.url}
+                          src={resolvedUrl}
                           alt={att.name}
                           style={{ width: widthStyle }}
                           className={`max-h-72 object-contain rounded border border-slate-200 dark:border-slate-700 ${alignImgClass}`}
+                          onError={(e) => handleDriveImageError(e, att.url)}
                         />
                         <span className="text-[10px] text-slate-400 mt-1 block italic">{att.name}</span>
                       </div>

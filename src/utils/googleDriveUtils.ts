@@ -49,24 +49,77 @@ export function extractDriveFileId(url: string): string | null {
 
 /**
  * Normalizes any Google Drive link or ID into a direct, high-performance image embedding URL.
- * Also preserves local /uploads/ URLs and Base64 Data URIs.
+ * Also preserves local /uploads/ URLs (converted to absolute origin) and Base64 Data URIs.
  */
 export function normalizeGoogleDriveImageUrl(url: string): string {
   if (!url || typeof url !== 'string') return '';
   const trimmed = url.trim();
 
-  // Already a data URI or local server upload
-  if (trimmed.startsWith('data:') || trimmed.startsWith('/uploads/')) {
+  // Already a data URI
+  if (trimmed.startsWith('data:')) {
+    return trimmed;
+  }
+
+  // Local server relative upload -> convert to absolute origin URL so other devices can render it
+  if (trimmed.startsWith('/uploads/')) {
+    if (typeof window !== 'undefined' && window.location?.origin) {
+      return `${window.location.origin}${trimmed}`;
+    }
     return trimmed;
   }
 
   const fileId = extractDriveFileId(trimmed);
   if (fileId) {
-    // lh3.googleusercontent.com/d/FILE_ID is the fastest and most reliable direct embed endpoint for Drive images
+    // lh3.googleusercontent.com/d/FILE_ID is the primary high-performance direct embed endpoint
     return `https://lh3.googleusercontent.com/d/${fileId}`;
   }
 
   return trimmed;
+}
+
+/**
+ * Returns an ordered array of fallback URLs for a given Google Drive file or server image URL.
+ */
+export function getDriveImageFallbackUrls(url: string): string[] {
+  if (!url || typeof url !== 'string') return [];
+  const trimmed = url.trim();
+  if (trimmed.startsWith('data:')) return [trimmed];
+
+  if (trimmed.startsWith('/uploads/')) {
+    const origin = typeof window !== 'undefined' ? window.location.origin : '';
+    return origin ? [`${origin}${trimmed}`, trimmed] : [trimmed];
+  }
+
+  const fileId = extractDriveFileId(trimmed);
+  if (fileId) {
+    return [
+      `https://lh3.googleusercontent.com/d/${fileId}`,
+      `https://drive.google.com/thumbnail?id=${fileId}&sz=w1200`,
+      `https://docs.google.com/uc?export=view&id=${fileId}`,
+      `https://drive.google.com/uc?id=${fileId}&export=download`,
+      trimmed,
+    ];
+  }
+  return [trimmed];
+}
+
+/**
+ * Automatic image error handler for React <img onError={...}> tags.
+ * Seamlessly cycles through Google Drive direct embed, thumbnail, uc?export=view, and original URLs.
+ */
+export function handleDriveImageError(
+  e: React.SyntheticEvent<HTMLImageElement, Event>,
+  originalUrl: string
+) {
+  const img = e.currentTarget;
+  const fallbacks = getDriveImageFallbackUrls(originalUrl);
+  const currentIndex = parseInt(img.dataset.fallbackIndex || '0', 10);
+
+  if (currentIndex + 1 < fallbacks.length) {
+    const nextIndex = currentIndex + 1;
+    img.dataset.fallbackIndex = String(nextIndex);
+    img.src = fallbacks[nextIndex];
+  }
 }
 
 /**
@@ -205,9 +258,17 @@ export async function uploadMediaToDriveOrFallback(
       const serverResult = await serverResponse.json();
       if (serverResult.success && serverResult.url) {
         onProgress?.(95, 'Berkas berhasil disimpan di server media.');
+        // Ensure absolute origin URL so it works on other devices/domains
+        const absoluteUrl = serverResult.url.startsWith('/uploads/') && typeof window !== 'undefined'
+          ? `${window.location.origin}${serverResult.url}`
+          : serverResult.url;
+
+        // For images under 8MB, prefer base64Data for 100% cross-device guarantee
+        const finalUrl = file.type.startsWith('image/') && file.size <= 8 * 1024 * 1024 ? base64Data : absoluteUrl;
+
         return {
           name: serverResult.name || file.name,
-          url: serverResult.url,
+          url: finalUrl,
           size: serverResult.size || fileSizeFormatted,
           storageProvider: 'server',
         };

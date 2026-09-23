@@ -15,7 +15,7 @@ import {
 } from 'docx';
 import { saveAs } from 'file-saver';
 import { Question } from '../types';
-import { normalizeGoogleDriveImageUrl } from './googleDriveUtils';
+import { normalizeGoogleDriveImageUrl, getDriveImageFallbackUrls } from './googleDriveUtils';
 
 /**
  * Helper to convert an image URL (Base64 data URI, HTTP URL, or local upload) into a Uint8Array
@@ -24,35 +24,39 @@ import { normalizeGoogleDriveImageUrl } from './googleDriveUtils';
 async function fetchImageAsUint8Array(
   url: string
 ): Promise<{ data: Uint8Array; width: number; height: number } | null> {
-  try {
-    if (!url) return null;
-    const resolvedUrl = normalizeGoogleDriveImageUrl(url);
+  if (!url) return null;
+  const fallbacks = getDriveImageFallbackUrls(url);
 
-    // 1. Base64 Data URI
-    if (resolvedUrl.startsWith('data:')) {
-      const parts = resolvedUrl.split(',');
-      if (parts.length < 2) return null;
-      const base64Str = parts[1];
-      const binaryStr = atob(base64Str);
-      const bytes = new Uint8Array(binaryStr.length);
-      for (let i = 0; i < binaryStr.length; i++) {
-        bytes[i] = binaryStr.charCodeAt(i);
+  for (const targetUrl of fallbacks) {
+    try {
+      if (targetUrl.startsWith('data:')) {
+        const parts = targetUrl.split(',');
+        if (parts.length >= 2) {
+          const base64Str = parts[1];
+          const binaryStr = atob(base64Str);
+          const bytes = new Uint8Array(binaryStr.length);
+          for (let i = 0; i < binaryStr.length; i++) {
+            bytes[i] = binaryStr.charCodeAt(i);
+          }
+          return { data: bytes, width: 380, height: 220 };
+        }
       }
-      return { data: bytes, width: 380, height: 220 };
+
+      const res = await fetch(targetUrl, { method: 'GET' });
+      if (res.ok) {
+        const buffer = await res.arrayBuffer();
+        const bytes = new Uint8Array(buffer);
+        if (bytes.length > 0) {
+          return { data: bytes, width: 380, height: 220 };
+        }
+      }
+    } catch {
+      // try next fallback URL
     }
-
-    // 2. Fetch via HTTP
-    const res = await fetch(resolvedUrl, { method: 'GET' });
-    if (!res.ok) return null;
-    const buffer = await res.arrayBuffer();
-    const bytes = new Uint8Array(buffer);
-    if (bytes.length === 0) return null;
-
-    return { data: bytes, width: 380, height: 220 };
-  } catch (err) {
-    console.warn('Unable to download image for Word embedding:', err);
-    return null;
   }
+
+  console.warn('Unable to download image for Word embedding after trying fallbacks:', url);
+  return null;
 }
 
 export interface PacketExportInfo {
