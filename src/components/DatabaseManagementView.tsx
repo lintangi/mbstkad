@@ -740,15 +740,14 @@ export const DatabaseManagementView: React.FC = () => {
 
             <div className="flex items-center justify-between pt-2">
               <div className="flex items-center space-x-3">
-                <label className="flex items-center space-x-2 text-xs font-medium text-slate-700 dark:text-slate-300 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={autoSyncEnabled}
-                    onChange={(e) => setAutoSyncEnabled(e.target.checked)}
-                    className="rounded text-emerald-600 focus:ring-emerald-500 w-4 h-4"
-                  />
-                  <span>Aktifkan Sinkronisasi Otomatis</span>
-                </label>
+                <div className="flex items-center space-x-2 text-xs font-medium text-slate-700 dark:text-slate-300">
+                  <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold bg-blue-100 text-blue-800 dark:bg-blue-900/60 dark:text-blue-300">
+                    Sinkronisasi Berbasis Aksi
+                  </span>
+                  <span className="text-[11px] text-slate-500 dark:text-slate-400">
+                    Kirim data ke database saat ada perubahan soal dari user
+                  </span>
+                </div>
                 {lastDualSyncTime && (
                   <span className="text-[11px] text-slate-500 dark:text-slate-400">
                     Terakhir disinkronkan: {lastDualSyncTime}

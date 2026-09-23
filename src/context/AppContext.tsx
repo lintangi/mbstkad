@@ -597,9 +597,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [autoSyncEnabled, setAutoSyncEnabled] = useState<boolean>(() => {
     try {
       const saved = localStorage.getItem(STORAGE_KEY_AUTOSYNC);
-      return saved !== null ? saved === 'true' : true;
+      return saved !== null ? saved === 'true' : false;
     } catch {
-      return true;
+      return false;
     }
   });
   const [isSyncing, setIsSyncing] = useState<boolean>(false);
@@ -1328,6 +1328,142 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return { addedCount, updatedCount, errors };
   };
 
+  /**
+   * Mengirim data soal ke basis data (Firestore & Google Sheets Sheet 1: Soal_TKAD)
+   * HANYA saat ada aksi perubahan terkait soal dari user:
+   * buat soal, update, submit review, approve, reject, request change, dsb.
+   */
+  const syncQuestionActionToDatabase = async (
+    actionType: 'CREATE_QUESTION' | 'UPDATE_QUESTION' | 'SUBMIT_REVIEW' | 'APPROVE' | 'REJECT' | 'REQUEST_CHANGES' | 'RECALL' | 'DUPLICATE' | 'DELETE_QUESTION' | 'ROLLBACK',
+    questionOrList: Question | Question[],
+    nextQuestions: Question[],
+    customDeletedIds?: string[]
+  ) => {
+    // 1. Simpan perubahan ke Firebase Firestore
+    try {
+      if (Array.isArray(questionOrList)) {
+        if (actionType === 'DELETE_QUESTION') {
+          for (const q of questionOrList) {
+            await removeQuestionFromFirestore(q.id);
+          }
+        } else {
+          for (const q of questionOrList) {
+            await syncQuestionToFirestore(q);
+          }
+        }
+      } else {
+        if (actionType === 'DELETE_QUESTION') {
+          await removeQuestionFromFirestore(questionOrList.id);
+        } else {
+          await syncQuestionToFirestore(questionOrList);
+        }
+      }
+    } catch (fsErr) {
+      console.warn('Firestore question action sync error:', fsErr);
+    }
+
+    // 2. Kirim perubahan ke Google Sheets (Sheet 1: Soal_TKAD) via GAS HANYA pada aksi perubahan dari user ini
+    if (spreadsheetId && gasWebhookUrl) {
+      try {
+        const enrichedQuestions = nextQuestions.map((q) => {
+          const driveLinks = (q.attachments || [])
+            .map((att) => {
+              const fileId = extractDriveFileId(att.url);
+              if (fileId) {
+                return `https://drive.google.com/file/d/${fileId}/view?usp=sharing`;
+              }
+              return att.url;
+            })
+            .filter(Boolean)
+            .join('\n');
+
+          return {
+            ...q,
+            lampiran_media: driveLinks,
+            driveAttachmentUrl: driveLinks,
+            attachmentDriveLinks: driveLinks,
+            attachmentNames: (q.attachments || []).map((a) => a.name).join(', '),
+          };
+        });
+
+        const actionLabels: Record<string, string> = {
+          CREATE_QUESTION: 'Buat Soal',
+          UPDATE_QUESTION: 'Update Soal',
+          SUBMIT_REVIEW: 'Submit Review',
+          APPROVE: 'Approve Soal',
+          REJECT: 'Reject Soal',
+          REQUEST_CHANGES: 'Request Change',
+          RECALL: 'Tarik Draf',
+          DUPLICATE: 'Duplikasi Soal',
+          DELETE_QUESTION: 'Hapus Soal',
+          ROLLBACK: 'Rollback Soal',
+        };
+        const actionLabel = actionLabels[actionType] || actionType;
+
+        const payload = {
+          action: 'PUSH_QUESTION',
+          actionTrigger: actionType,
+          actionLabel,
+          spreadsheetId,
+          questions: enrichedQuestions,
+          users,
+          deletedQuestionIds: customDeletedIds || deletedQuestionIds,
+          auditLogs: auditLogs.slice(0, 30),
+          timestamp: new Date().toISOString(),
+        };
+
+        let pushSucceeded = false;
+        let responseMsg = '';
+
+        // Prioritas 1: Server proxy /api/gas-sync
+        try {
+          const proxyRes = await fetch('/api/gas-sync', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              webhookUrl: gasWebhookUrl,
+              payload,
+            }),
+          });
+          if (proxyRes.ok) {
+            const json = await proxyRes.json();
+            if (json.success) {
+              pushSucceeded = true;
+              responseMsg = json.message || `Aksi ${actionLabel} berhasil dikirim ke Google Sheets (Soal_TKAD).`;
+            }
+          }
+        } catch (proxyErr) {
+          console.warn('Proxy /api/gas-sync error, using fallback:', proxyErr);
+        }
+
+        // Prioritas 2: Fallback direct mode: no-cors
+        if (!pushSucceeded) {
+          try {
+            await fetch(gasWebhookUrl, {
+              method: 'POST',
+              headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+              body: JSON.stringify(payload),
+              mode: 'no-cors',
+            });
+            pushSucceeded = true;
+            responseMsg = `Aksi ${actionLabel} berhasil dikirim ke Google Apps Script (Soal_TKAD).`;
+          } catch (directErr) {
+            console.warn('Direct fetch error:', directErr);
+          }
+        }
+
+        if (pushSucceeded) {
+          const timeStr = new Date().toLocaleTimeString('id-ID');
+          setLastGasSyncTime(timeStr);
+          setSyncStatus('success');
+          setSyncMessage(responseMsg);
+        }
+      } catch (sheetsErr) {
+        console.warn('Google Sheets action sync error:', sheetsErr);
+      }
+    }
+  };
+
   // Question CRUD & Workflows
   const createQuestion = (data: Partial<Question>, submitDirectly: boolean): Question => {
     const newId = `q-${Date.now()}`;
@@ -1373,8 +1509,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       ],
     };
 
-    setQuestions((prev) => [newQuestion, ...prev]);
-    syncQuestionToFirestore(newQuestion);
+    const nextQuestions = [newQuestion, ...questions];
+    setQuestions((prev) => [newQuestion, ...prev.filter((q) => q.id !== newId)]);
+    syncQuestionActionToDatabase(
+      submitDirectly ? 'SUBMIT_REVIEW' : 'CREATE_QUESTION',
+      newQuestion,
+      nextQuestions
+    );
 
     addAuditLog(
       submitDirectly ? 'SUBMIT_REVIEW' : 'CREATE_QUESTION',
@@ -1459,7 +1600,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     );
 
     if (updatedQ && oldQ) {
-      syncQuestionToFirestore(updatedQ);
+      const actionType = submitForReview ? 'SUBMIT_REVIEW' : 'UPDATE_QUESTION';
+      const nextQuestions = questions.map((item) => (item.id === id ? updatedQ! : item));
+      syncQuestionActionToDatabase(actionType, updatedQ, nextQuestions);
       addAuditLog(
         submitForReview ? 'SUBMIT_REVIEW' : 'UPDATE_QUESTION',
         submitForReview
@@ -1503,10 +1646,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       updatedAt: new Date().toISOString(),
     };
 
+    const nextQuestions = questions.map((item) => (item.id === id ? updated : item));
     setQuestions((prev) =>
       prev.map((item) => (item.id === id ? updated : item))
     );
-    syncQuestionToFirestore(updated);
+    syncQuestionActionToDatabase('RECALL', updated, nextQuestions);
 
     addAuditLog(
       'RECALL',
@@ -1568,8 +1712,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       ],
     };
 
+    const nextQuestions = [cloned, ...questions];
     setQuestions((prev) => [cloned, ...prev]);
-    syncQuestionToFirestore(cloned);
+    syncQuestionActionToDatabase('DUPLICATE', cloned, nextQuestions);
     addAuditLog(
       'DUPLICATE',
       `Menduplikasi soal ${original.code} menjadi variasi baru ${newCode}`,
@@ -1589,9 +1734,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const q = questions.find((item) => item.id === id);
     if (!q) return;
 
+    const nextQuestions = questions.filter((item) => item.id !== id);
+    const nextDeletedIds = Array.from(new Set([...deletedQuestionIds, id]));
     setQuestions((prev) => prev.filter((item) => item.id !== id));
     setDeletedQuestionIds((prev) => Array.from(new Set([...prev, id])));
-    removeQuestionFromFirestore(id);
+    syncQuestionActionToDatabase('DELETE_QUESTION', q, nextQuestions, nextDeletedIds);
     addAuditLog(
       'UPDATE_QUESTION',
       `Menghapus butir soal ${q.code}`,
@@ -1612,9 +1759,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const deletedQuestionsList = questions.filter((q) => idSet.has(q.id));
     const deletedCount = deletedQuestionsList.length;
 
+    const nextQuestions = questions.filter((q) => !idSet.has(q.id));
+    const nextDeletedIds = Array.from(new Set([...deletedQuestionIds, ...ids]));
     setQuestions((prev) => prev.filter((q) => !idSet.has(q.id)));
     setDeletedQuestionIds((prev) => Array.from(new Set([...prev, ...ids])));
-    ids.forEach((id) => removeQuestionFromFirestore(id));
+    syncQuestionActionToDatabase('DELETE_QUESTION', deletedQuestionsList, nextQuestions, nextDeletedIds);
 
     addAuditLog(
       'BULK_DELETE_QUESTIONS',
@@ -1887,7 +2036,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     );
 
     if (updatedQ) {
-      syncQuestionToFirestore(updatedQ);
+      let actionType: 'APPROVE' | 'REJECT' | 'REQUEST_CHANGES' = 'APPROVE';
+      if (decision === 'reject') actionType = 'REJECT';
+      else if (decision === 'request_changes') actionType = 'REQUEST_CHANGES';
+
+      const nextQuestions = questions.map((q) => (q.id === questionId ? updatedQ! : q));
+      syncQuestionActionToDatabase(actionType, updatedQ, nextQuestions);
     }
 
     addAuditLog(
@@ -2246,46 +2400,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   };
 
-  // Auto-sync effect: initial pull from Google Sheets on mount or when spreadsheetId changes
-  useEffect(() => {
-    if (autoSyncEnabled && spreadsheetId) {
-      pullFromGoogleSheets();
-    }
-  }, [spreadsheetId]);
-
-  // Push all data to Google Sheets when spreadsheetId or gasWebhookUrl is configured
-  useEffect(() => {
-    if (autoSyncEnabled && spreadsheetId && gasWebhookUrl && questions.length > 0) {
-      syncWithGoogleSheets({ silent: true });
-    }
-  }, [spreadsheetId, gasWebhookUrl]);
-
-  // Periodic auto-sync every 60 seconds
-  useEffect(() => {
-    if (!autoSyncEnabled) return;
-    const interval = setInterval(() => {
-      syncWithGoogleSheets({ silent: true });
-    }, 60000);
-    return () => clearInterval(interval);
-  }, [autoSyncEnabled, spreadsheetId, questions, users, auditLogs, gasWebhookUrl]);
-
-  // Debounced auto-sync when questions change
-  useEffect(() => {
-    if (!autoSyncEnabled) return;
-    const timer = setTimeout(() => {
-      syncWithGoogleSheets({ silent: true });
-    }, 1500);
-    return () => clearTimeout(timer);
-  }, [questions, autoSyncEnabled]);
-
-  // Debounced auto-sync when users change (User Management)
-  useEffect(() => {
-    if (!autoSyncEnabled) return;
-    const timer = setTimeout(() => {
-      syncWithGoogleSheets({ silent: true });
-    }, 1500);
-    return () => clearTimeout(timer);
-  }, [users, autoSyncEnabled]);
+  // CATATAN: Sinkronisasi otomatis (interval 60 detik & debounced auto-push) untuk Bank Soal (Sheet 1: Soal_TKAD) telah dinonaktifkan.
+  // Pengiriman data soal ke basis data kini HANYA dipicu saat ada aksi perubahan terkait soal dari pengguna
+  // (buat soal, update, submit review, approve, reject, request change, recall, duplicate, delete) melalui syncQuestionActionToDatabase.
 
   // Dual Database Sync (Firebase Firestore + Google Sheets)
   const [dualSyncStatus, setDualSyncStatus] = useState<'idle' | 'syncing' | 'success' | 'error'>('idle');
@@ -2590,38 +2707,55 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         if (snap.targetType === 'question') {
           if (snap.previousData && snap.newData) {
             // Restore previousData
+            let nextQ: Question[] = [];
             setQuestions((prev) => {
               const exists = prev.some((q) => q.id === snap.targetId);
-              if (exists) {
-                return prev.map((q) => (q.id === snap.targetId ? snap.previousData : q));
-              } else {
-                return [snap.previousData, ...prev];
-              }
+              nextQ = exists
+                ? prev.map((q) => (q.id === snap.targetId ? snap.previousData : q))
+                : [snap.previousData, ...prev];
+              return nextQ;
             });
-            await syncQuestionToFirestore(snap.previousData);
+            await syncQuestionActionToDatabase('ROLLBACK', snap.previousData, nextQ);
             rollbackSummary = `Mengembalikan soal ${snap.previousData.code || snap.targetId} ke versi sebelum perubahan.`;
           } else if (snap.newData && !snap.previousData) {
             // It was created -> delete it
-            setQuestions((prev) => prev.filter((q) => q.id !== snap.targetId));
-            if (snap.targetId) await removeQuestionFromFirestore(snap.targetId);
+            let nextQ: Question[] = [];
+            setQuestions((prev) => {
+              nextQ = prev.filter((q) => q.id !== snap.targetId);
+              return nextQ;
+            });
+            const nextDeleted = Array.from(new Set([...deletedQuestionIds, snap.targetId]));
+            setDeletedQuestionIds(nextDeleted);
+            if (snap.targetId) {
+              await syncQuestionActionToDatabase('DELETE_QUESTION', { id: snap.targetId } as Question, nextQ, nextDeleted);
+            }
             rollbackSummary = `Menghapus butir soal yang dibuat pada tindakan ini.`;
           } else if (snap.previousData && !snap.newData) {
             // It was deleted -> restore it
-            setQuestions((prev) => [snap.previousData, ...prev]);
-            await syncQuestionToFirestore(snap.previousData);
+            let nextQ: Question[] = [];
+            setQuestions((prev) => {
+              nextQ = [snap.previousData, ...prev];
+              return nextQ;
+            });
+            const nextDeleted = deletedQuestionIds.filter((did) => did !== snap.previousData.id);
+            setDeletedQuestionIds(nextDeleted);
+            await syncQuestionActionToDatabase('ROLLBACK', snap.previousData, nextQ, nextDeleted);
             rollbackSummary = `Memulihkan butir soal ${snap.previousData.code} yang sebelumnya dihapus.`;
           }
         } else if (snap.targetType === 'bulk_questions') {
           if (Array.isArray(snap.previousData)) {
             const toRestore: Question[] = snap.previousData;
+            let nextQ: Question[] = [];
             setQuestions((prev) => {
               const existingIds = new Set(prev.map((q) => q.id));
               const newItems = toRestore.filter((q) => !existingIds.has(q.id));
-              return [...newItems, ...prev];
+              nextQ = [...newItems, ...prev];
+              return nextQ;
             });
-            for (const q of toRestore) {
-              await syncQuestionToFirestore(q);
-            }
+            const restoredIds = new Set(toRestore.map((q) => q.id));
+            const nextDeleted = deletedQuestionIds.filter((did) => !restoredIds.has(did));
+            setDeletedQuestionIds(nextDeleted);
+            await syncQuestionActionToDatabase('ROLLBACK', toRestore, nextQ, nextDeleted);
             rollbackSummary = `Memulihkan ${toRestore.length} butir soal yang terhapus secara massal.`;
           }
         } else if (snap.targetType === 'user') {

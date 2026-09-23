@@ -721,14 +721,12 @@ function initDatabaseSheets(ss) {
               <p className="text-sm font-bold text-slate-900 dark:text-white">
                 Basis Data Aktif: <span className="font-mono text-xs text-blue-700 dark:text-blue-400">{spreadsheetId}</span>
               </p>
-              {autoSyncEnabled && (
-                <span className="text-[10px] bg-emerald-100 dark:bg-emerald-900/50 text-emerald-700 dark:text-emerald-300 px-2 py-0.5 rounded-full font-semibold">
-                  Auto-Sync Aktif
-                </span>
-              )}
+              <span className="text-[10px] bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300 px-2 py-0.5 rounded-full font-semibold">
+                Sinkronisasi Berbasis Aksi
+              </span>
             </div>
             <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-              {lastGasSyncTime ? `Terakhir sinkronisasi: ${lastGasSyncTime}` : 'Otomatis tersinkron setiap perubahan butir soal & interval 60 detik'}
+              {lastGasSyncTime ? `Terakhir update: ${lastGasSyncTime}` : 'Data dikirim ke Sheet 1 (Soal_TKAD) hanya saat ada aksi perubahan soal dari user'}
             </p>
           </div>
         </div>
@@ -829,27 +827,19 @@ function initDatabaseSheets(ss) {
               </p>
             </div>
 
-            {/* Auto-sync Toggle Card */}
-            <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700/60 flex items-center justify-between">
-              <div className="space-y-0.5">
-                <p className="text-xs font-bold text-slate-900 dark:text-white flex items-center space-x-2">
-                  <span>Sinkronisasi Otomatis (Auto-Sync)</span>
-                  <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+            {/* Kebijakan Sinkronisasi Berbasis Aksi */}
+            <div className="p-4 rounded-xl bg-blue-50/70 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-800/60 flex items-start space-x-3.5">
+              <div className="w-8 h-8 rounded-lg bg-blue-600/10 dark:bg-blue-500/20 text-blue-600 dark:text-blue-400 flex items-center justify-center shrink-0 mt-0.5">
+                <CheckCircle2 className="w-4 h-4" />
+              </div>
+              <div className="space-y-1">
+                <p className="text-xs font-bold text-slate-900 dark:text-white">
+                  Kebijakan Sinkronisasi: Berbasis Aksi Pengguna (Sheet 1: Soal_TKAD)
                 </p>
-                <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                  Secara otomatis menyinkronkan data setiap ada perubahan pada bank soal dan interval berkala 60 detik.
+                <p className="text-[11px] text-slate-600 dark:text-slate-300 leading-relaxed">
+                  Fitur sinkronisasi otomatis/interval berkala telah dinonaktifkan. Data bank soal hanya dikirim ke database jika terdapat aksi perubahan dari pengguna: <strong>buat soal</strong>, <strong>update</strong>, <strong>submit review</strong>, <strong>approve</strong>, <strong>reject</strong>, atau <strong>request change</strong>.
                 </p>
               </div>
-
-              <label className="relative inline-flex items-center cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={autoSyncEnabled}
-                  onChange={(e) => setAutoSyncEnabled(e.target.checked)}
-                  className="sr-only peer"
-                />
-                <div className="w-11 h-6 bg-slate-300 peer-focus:outline-none rounded-full peer dark:bg-slate-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-slate-600 peer-checked:bg-emerald-600"></div>
-              </label>
             </div>
 
             {/* Spreadsheet ID Field */}
