@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Save,
   Send,
@@ -18,6 +18,8 @@ import {
   Table as TableIcon,
   UploadCloud,
   Loader2,
+  Table,
+  GripVertical,
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import {
@@ -30,6 +32,7 @@ import {
   QuestionAttachment,
 } from '../types';
 import { LatexRenderer } from '../utils/latexParser';
+import { QuestionPromptViewer } from './QuestionPromptViewer';
 import {
   uploadMediaToDriveOrFallback,
   normalizeGoogleDriveImageUrl,
@@ -69,6 +72,31 @@ export const QuestionEditor: React.FC = () => {
     ? categories.map((c) => c.name)
     : ['Bahasa Indonesia', 'Matematika', 'IPAS'];
 
+  // Helper to generate automatic sequential question code
+  const getNextAutoCode = (targetSubtest: string, list: Question[]): string => {
+    const prefix = targetSubtest === 'Bahasa Indonesia' ? 'BIN' : targetSubtest === 'Matematika' ? 'MAT' : 'IPA';
+    let maxNum = 0;
+    list.forEach((q) => {
+      const regex = new RegExp(`TKAD-(?:${prefix}-)?(\\d+)`, 'i');
+      const m = q.code?.match(regex);
+      if (m && m[1]) {
+        const n = parseInt(m[1], 10);
+        if (!isNaN(n) && n > maxNum) maxNum = n;
+      }
+    });
+    if (maxNum === 0) {
+      list.forEach((q) => {
+        const m = q.code?.match(/TKAD-(\d+)/i);
+        if (m && m[1]) {
+          const n = parseInt(m[1], 10);
+          if (!isNaN(n) && n > maxNum) maxNum = n;
+        }
+      });
+    }
+    const nextNum = maxNum > 0 ? maxNum + 1 : (list.length + 1);
+    return `TKAD-${prefix}-${String(nextNum).padStart(3, '0')}`;
+  };
+
   // Permission verification
   const editPermission = editingQuestion
     ? canUserEditQuestion(currentUser, editingQuestion)
@@ -77,11 +105,10 @@ export const QuestionEditor: React.FC = () => {
     : { allowed: true };
 
   // Form states
-  const [code, setCode] = useState(editingQuestion?.code || '');
+  const initialSubtest = editingQuestion?.subtest || userDeptCategory || availableSubtests[0] || 'Bahasa Indonesia';
+  const [code, setCode] = useState(editingQuestion?.code || getNextAutoCode(initialSubtest, questions));
   const [type, setType] = useState<QuestionType>(editingQuestion?.type || 'pilihan_ganda');
-  const [subtest, setSubtest] = useState(
-    editingQuestion?.subtest || userDeptCategory || availableSubtests[0] || 'Bahasa Indonesia'
-  );
+  const [subtest, setSubtest] = useState(initialSubtest);
   const [element, setElement] = useState(editingQuestion?.element || editingQuestion?.topic || 'Materi Pokok');
   const [subElement, setSubElement] = useState(editingQuestion?.subElement || '');
   const [competency, setCompetency] = useState(editingQuestion?.competency || '');
@@ -94,7 +121,10 @@ export const QuestionEditor: React.FC = () => {
   const [explanation, setExplanation] = useState(editingQuestion?.explanation || '');
   const [showPreview, setShowPreview] = useState(true);
 
-  // Options for Pilihan Ganda & Kompleks
+  // Reference to prompt textarea for precise insertion at cursor position
+  const promptTextareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // Options for Pilihan Ganda & Kompleks (DEFAULT 4 OPTIONS)
   const [options, setOptions] = useState<ChoiceOption[]>(
     editingQuestion?.options?.length
       ? editingQuestion.options
@@ -103,7 +133,6 @@ export const QuestionEditor: React.FC = () => {
           { id: 'opt-2', label: 'B', text: '', isCorrect: false },
           { id: 'opt-3', label: 'C', text: '', isCorrect: false },
           { id: 'opt-4', label: 'D', text: '', isCorrect: false },
-          { id: 'opt-5', label: 'E', text: '', isCorrect: false },
         ]
   );
 
@@ -117,7 +146,7 @@ export const QuestionEditor: React.FC = () => {
         ]
   );
 
-  // True / False statements (Tabel: No, Pernyataan, Benar, Salah)
+  // True / False statements (Tabel: No, Pernyataan, Benar, Salah) (DEFAULT 3 STATEMENTS)
   const [trueFalseItems, setTrueFalseItems] = useState<TrueFalseItem[]>(
     editingQuestion?.trueFalseItems?.length
       ? editingQuestion.trueFalseItems
@@ -137,6 +166,46 @@ export const QuestionEditor: React.FC = () => {
   // Attachments
   const [attachmentUrl, setAttachmentUrl] = useState('');
   const [attachments, setAttachments] = useState<QuestionAttachment[]>(editingQuestion?.attachments || []);
+  const [isDraggingOverTextarea, setIsDraggingOverTextarea] = useState(false);
+
+  // Sync state whenever editingQuestion changes to prevent metadata loss
+  useEffect(() => {
+    if (editingQuestion) {
+      setCode(editingQuestion.code || '');
+      setType(editingQuestion.type || 'pilihan_ganda');
+      setSubtest(editingQuestion.subtest || userDeptCategory || availableSubtests[0] || 'Bahasa Indonesia');
+      setElement(editingQuestion.element || editingQuestion.topic || 'Materi Pokok');
+      setSubElement(editingQuestion.subElement || '');
+      setCompetency(editingQuestion.competency || '');
+      setCognitiveLevel(editingQuestion.cognitiveLevel || 'C2 - Memahami');
+      setDifficulty(editingQuestion.difficulty || 'sedang');
+      setDefaultScore(editingQuestion.defaultScore || 4);
+      setTagInput((editingQuestion.tags || []).join(', '));
+      setPrompt(editingQuestion.prompt || '');
+      setExplanation(editingQuestion.explanation || '');
+      if (editingQuestion.options && editingQuestion.options.length > 0) {
+        setOptions(editingQuestion.options);
+      }
+      if (editingQuestion.matchingPairs && editingQuestion.matchingPairs.length > 0) {
+        setMatchingPairs(editingQuestion.matchingPairs);
+      }
+      if (editingQuestion.trueFalseItems && editingQuestion.trueFalseItems.length > 0) {
+        setTrueFalseItems(editingQuestion.trueFalseItems);
+      }
+      setShortAnswerKey(editingQuestion.shortAnswerKey || '');
+      setEssayRubric(editingQuestion.essayRubric || '');
+      setAttachments(editingQuestion.attachments || []);
+    } else {
+      setCode(getNextAutoCode(subtest, questions));
+    }
+  }, [editingQuestionId, editingQuestion]);
+
+  // Update automatic code when subtest changes on new question
+  useEffect(() => {
+    if (!editingQuestionId) {
+      setCode(getNextAutoCode(subtest, questions));
+    }
+  }, [subtest]);
 
   // Direct file upload state to Google Drive
   const [isUploading, setIsUploading] = useState(false);
@@ -176,11 +245,13 @@ export const QuestionEditor: React.FC = () => {
       const newAtt: QuestionAttachment = {
         id: newId,
         name: result.name,
+        source: '',
         type: file.type.startsWith('video') ? 'document' : file.type.startsWith('audio') ? 'audio' : 'image',
         url: normalizeGoogleDriveImageUrl(result.url),
         size: result.size,
         width: 100, // default size percentage
         align: 'center', // default alignment
+        position: 'bottom',
       };
 
       setAttachments((prev) => [...prev, newAtt]);
@@ -214,9 +285,40 @@ export const QuestionEditor: React.FC = () => {
     }
   }, [userDeptCategory]);
 
-  // Quick Math Snippets inserter
+  // Helper to insert text at current cursor position in prompt textarea
+  const insertTextAtCursor = (textToInsert: string) => {
+    const textarea = promptTextareaRef.current;
+    if (!textarea) {
+      setPrompt((prev) => `${prev} ${textToInsert} `);
+      return;
+    }
+    const start = textarea.selectionStart ?? prompt.length;
+    const end = textarea.selectionEnd ?? prompt.length;
+    const newPrompt = prompt.substring(0, start) + textToInsert + prompt.substring(end);
+    setPrompt(newPrompt);
+
+    setTimeout(() => {
+      textarea.focus();
+      const newPos = start + textToInsert.length;
+      textarea.setSelectionRange(newPos, newPos);
+    }, 0);
+  };
+
+  // Quick Math Snippets inserter at cursor position
   const insertLatex = (formula: string) => {
-    setPrompt((prev) => `${prev} ${formula} `);
+    insertTextAtCursor(` ${formula} `);
+  };
+
+  // Insert Table helper (Markdown Table) at cursor position
+  const insertTable = (rows = 3, cols = 3) => {
+    let tableMd = '\n\n';
+    tableMd += '| ' + Array.from({ length: cols }, (_, i) => `Kolom ${i + 1}`).join(' | ') + ' |\n';
+    tableMd += '| ' + Array.from({ length: cols }, () => '---').join(' | ') + ' |\n';
+    for (let r = 1; r < rows; r++) {
+      tableMd += '| ' + Array.from({ length: cols }, (_, c) => `Data ${r}.${c + 1}`).join(' | ') + ' |\n';
+    }
+    tableMd += '\n';
+    insertTextAtCursor(tableMd);
   };
 
   const handleAddOption = () => {
@@ -250,10 +352,12 @@ export const QuestionEditor: React.FC = () => {
       name: driveFileId
         ? `Media Google Drive (${driveFileId.slice(0, 8)}...)`
         : `Lampiran Gambar #${attachments.length + 1}`,
+      source: '',
       type: 'image',
       url: normalizedUrl,
       width: 100,
       align: 'center',
+      position: 'bottom',
     };
     setAttachments((prev) => [...prev, newAtt]);
     setAttachmentUrl('');
@@ -277,9 +381,9 @@ export const QuestionEditor: React.FC = () => {
         alert('Wajib memilih minimal satu kunci jawaban yang benar!');
         return;
       }
-      const emptyOption = options.some((o) => !o.text.trim());
+      const emptyOption = options.some((o) => !o.text.trim() && !o.imageUrl);
       if (emptyOption) {
-        alert('Semua opsi pilihan jawaban harus diisi teksnya!');
+        alert('Semua opsi pilihan jawaban harus memiliki teks atau gambar jawaban!');
         return;
       }
     } else if (type === 'benar_salah') {
@@ -296,17 +400,18 @@ export const QuestionEditor: React.FC = () => {
       .filter(Boolean);
 
     const questionData: Partial<Question> = {
-      code: code.trim() || undefined,
+      code: code.trim() || editingQuestion?.code,
       type,
-      subtest,
-      element: element.trim() || 'Umum',
-      subElement: subElement.trim() || undefined,
-      competency: competency.trim() || undefined,
-      cognitiveLevel: cognitiveLevel || undefined,
-      topic: element.trim() || 'Umum',
-      difficulty,
-      defaultScore: Number(defaultScore) || 4,
-      tags,
+      subtest: subtest || editingQuestion?.subtest,
+      element: element.trim() || editingQuestion?.element || editingQuestion?.topic || 'Materi Pokok',
+      subElement: subElement.trim() || editingQuestion?.subElement || '',
+      competency: competency.trim() || editingQuestion?.competency || '',
+      cognitiveLevel: cognitiveLevel || editingQuestion?.cognitiveLevel || 'C2 - Memahami',
+      topic: element.trim() || editingQuestion?.topic || 'Umum',
+      difficulty: difficulty || editingQuestion?.difficulty || 'sedang',
+      defaultScore: Number(defaultScore) || editingQuestion?.defaultScore || 4,
+      tags: tags.length > 0 ? tags : (editingQuestion?.tags || []),
+      packetIds: editingQuestion?.packetIds || [],
       prompt,
       explanation,
       attachments,
@@ -739,19 +844,25 @@ export const QuestionEditor: React.FC = () => {
               <div className="space-y-3.5 pt-2.5 border-t border-slate-100 dark:border-slate-800/80">
                 <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500">Berkas Terlampir ({attachments.length})</span>
                 {attachments.map((att, idx) => {
-                  const updateAttachmentConfig = (width: number, align: 'left' | 'center' | 'right') => {
+                  const updateAttachmentConfig = (width: number, align: 'left' | 'center' | 'right', position: 'top' | 'middle' | 'bottom') => {
                     setAttachments((prev) =>
-                      prev.map((item, i) => (i === idx ? { ...item, width, align } : item))
+                      prev.map((item, i) => (i === idx ? { ...item, width, align, position } : item))
                     );
                   };
 
                   return (
-                    <div key={att.id} className="p-3 bg-slate-50 dark:bg-slate-800/40 rounded-xl text-xs border border-slate-100 dark:border-slate-800/50 space-y-2.5">
+                    <div key={att.id} className="p-3.5 bg-slate-50 dark:bg-slate-800/40 rounded-xl text-xs border border-slate-100 dark:border-slate-800/50 space-y-3">
                       <div className="flex items-center justify-between">
-                        <div className="flex items-center space-x-2 truncate pr-4">
-                          <ImageIcon className="w-4 h-4 text-blue-500 shrink-0" />
+                        <div className="flex items-center space-x-2 truncate pr-2">
+                          <img
+                            src={normalizeGoogleDriveImageUrl(att.url)}
+                            alt="Pratinjau"
+                            className="w-7 h-7 rounded object-cover border border-slate-200 dark:border-slate-700 shrink-0"
+                          />
                           <div className="truncate text-left">
-                            <p className="truncate font-medium text-slate-800 dark:text-slate-200">{att.name}</p>
+                            <p className="truncate font-bold text-slate-800 dark:text-slate-200">
+                              Gambar {idx + 1}
+                            </p>
                             {att.size && <span className="text-[10px] text-slate-400 block font-mono">{att.size}</span>}
                           </div>
                         </div>
@@ -767,46 +878,114 @@ export const QuestionEditor: React.FC = () => {
                         )}
                       </div>
 
-                      {/* Formatting controls (size & position) */}
-                      <div className="pt-2 border-t border-slate-100 dark:border-slate-800/50 flex flex-wrap gap-x-4 gap-y-2 items-center justify-between text-[11px]">
-                        <div className="flex items-center space-x-2">
-                          <span className="text-slate-400 font-semibold uppercase tracking-wider text-[9px]">Ukuran:</span>
-                          <div className="flex items-center space-x-1">
-                            {[25, 50, 75, 100].map((w) => (
-                              <button
-                                key={w}
-                                type="button"
-                                onClick={() => updateAttachmentConfig(w, att.align || 'center')}
-                                className={`px-2 py-0.5 rounded text-[10px] font-bold transition cursor-pointer ${
-                                  (att.width || 100) === w
-                                    ? 'bg-blue-600 text-white shadow-xs'
-                                    : 'bg-white dark:bg-slate-700 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-600 hover:bg-slate-100 dark:hover:bg-slate-600'
-                                }`}
-                              >
-                                {w}%
-                              </button>
-                            ))}
-                          </div>
+                      {/* Sumber Media / Gambar (Input Manual) - Menggantikan Nama File */}
+                      <div className="space-y-1 pt-1 border-t border-slate-200/60 dark:border-slate-700/60">
+                        <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                          Sumber Media / Gambar * (Input Manual)
+                        </label>
+                        <input
+                          type="text"
+                          disabled={!editPermission.allowed}
+                          value={att.source ?? ''}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            setAttachments((prev) =>
+                              prev.map((item, i) => (i === idx ? { ...item, source: val } : item))
+                            );
+                          }}
+                          placeholder="Masukkan sumber gambar (misal: Dokumen Kemendikbud 2024)..."
+                          className="w-full text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-1.5 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 font-medium placeholder:text-slate-400"
+                        />
+                      </div>
+
+                      {/* Penempatan Gambar: Geser Slider Manual */}
+                      <div className="space-y-1.5 pt-1 border-t border-slate-200/60 dark:border-slate-700/60">
+                        <div className="flex items-center justify-between">
+                          <span className="text-slate-500 dark:text-slate-400 font-semibold uppercase tracking-wider text-[10px] block">
+                            Posisi Penempatan (Geser Slider):
+                          </span>
+                          <span className="text-[10px] font-bold text-blue-600 dark:text-blue-400">
+                            {att.position === 'top' ? 'Atas Teks' : att.position === 'middle' ? 'Di Antara Paragraf' : 'Di Bawah Teks'}
+                          </span>
+                        </div>
+                        <input
+                          type="range"
+                          min={0}
+                          max={2}
+                          step={1}
+                          disabled={!editPermission.allowed}
+                          value={att.position === 'top' ? 0 : att.position === 'middle' ? 1 : 2}
+                          onChange={(e) => {
+                            const v = parseInt(e.target.value, 10);
+                            const newPos = v === 0 ? 'top' : v === 1 ? 'middle' : 'bottom';
+                            updateAttachmentConfig(att.width || 100, att.align || 'center', newPos);
+                          }}
+                          className="w-full h-1.5 bg-slate-200 dark:bg-slate-700 rounded-lg appearance-none cursor-pointer accent-blue-600"
+                        />
+                        <div className="flex justify-between text-[9px] text-slate-400 font-medium px-0.5">
+                          <span>Atas Teks</span>
+                          <span>Antara Paragraf</span>
+                          <span>Bawah Teks</span>
+                        </div>
+                      </div>
+
+                      {/* Formatting controls (size slider & alignment) */}
+                      <div className="space-y-2 pt-1 border-t border-slate-200/60 dark:border-slate-700/60 text-[11px]">
+                        <div className="flex items-center justify-between">
+                          <span className="text-slate-500 dark:text-slate-400 font-semibold uppercase tracking-wider text-[10px]">
+                            Ukuran Lebar: <strong>{att.width || 100}%</strong>
+                          </span>
+                          <span className="text-[10px] text-slate-400">Geser slider ukuran</span>
                         </div>
 
+                        {/* Slider manual size */}
                         <div className="flex items-center space-x-2">
-                          <span className="text-slate-400 font-semibold uppercase tracking-wider text-[9px]">Posisi:</span>
+                          <input
+                            type="range"
+                            min={15}
+                            max={100}
+                            step={5}
+                            value={att.width || 100}
+                            onChange={(e) =>
+                              updateAttachmentConfig(
+                                parseInt(e.target.value, 10),
+                                att.align || 'center',
+                                att.position || 'bottom'
+                              )
+                            }
+                            className="w-full h-1.5 bg-slate-200 dark:bg-slate-700 rounded-lg appearance-none cursor-pointer accent-blue-600"
+                          />
+                        </div>
+
+                        {/* Alignment */}
+                        <div className="flex items-center justify-between pt-1">
                           <div className="flex items-center space-x-1">
+                            <span className="text-slate-400 font-semibold uppercase tracking-wider text-[9px] mr-1">Rata:</span>
                             {(['left', 'center', 'right'] as const).map((pos) => (
                               <button
                                 key={pos}
                                 type="button"
-                                onClick={() => updateAttachmentConfig(att.width || 100, pos)}
+                                onClick={() =>
+                                  updateAttachmentConfig(
+                                    att.width || 100,
+                                    pos,
+                                    att.position || 'bottom'
+                                  )
+                                }
                                 className={`px-2 py-0.5 rounded text-[10px] font-bold capitalize transition cursor-pointer ${
                                   (att.align || 'center') === pos
-                                    ? 'bg-blue-600 text-white shadow-xs'
-                                    : 'bg-white dark:bg-slate-700 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-600 hover:bg-slate-100 dark:hover:bg-slate-600'
+                                    ? 'bg-blue-600 text-white'
+                                    : 'bg-white dark:bg-slate-700 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-600'
                                 }`}
                               >
                                 {pos === 'left' ? 'Kiri' : pos === 'center' ? 'Tengah' : 'Kanan'}
                               </button>
                             ))}
                           </div>
+
+                          <span className="text-[10px] text-blue-600 dark:text-blue-400 font-semibold">
+                            {`Tag: {{gambar:${idx + 1}}}`}
+                          </span>
                         </div>
                       </div>
                     </div>
@@ -834,13 +1013,93 @@ export const QuestionEditor: React.FC = () => {
               </button>
             </div>
 
-            {/* Quick LaTeX Buttons */}
-            {editPermission.allowed && (
-              <div className="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 text-xs space-y-1.5">
-                <div className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 flex items-center space-x-1">
-                  <Code2 className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
-                  <span>Sisipkan Rumus Matematika (LaTeX):</span>
+            {/* Lampiran Media yang Dapat Digeser ke Kolom Soal Secara Manual */}
+            {attachments.length > 0 && (
+              <div className="p-3 rounded-xl bg-blue-50/70 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-800/80 space-y-2">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center space-x-2 text-xs font-bold text-blue-900 dark:text-blue-200">
+                    <GripVertical className="w-4 h-4 text-blue-600 dark:text-blue-400 shrink-0 animate-pulse" />
+                    <span>Media Siap Digeser Manual ke Kolom Soal:</span>
+                  </div>
+                  <span className="text-[10px] text-blue-700 dark:text-blue-300 font-medium">
+                    Tahan & geser (drag) ke posisi teks soal di bawah
+                  </span>
                 </div>
+                <div className="flex flex-wrap gap-2">
+                  {attachments.map((att, idx) => (
+                    <div
+                      key={att.id}
+                      draggable={editPermission.allowed}
+                      onDragStart={(e) => {
+                        e.dataTransfer.setData('text/plain', `\n\n{{gambar:${idx + 1}}}\n\n`);
+                        e.dataTransfer.setData('text/attachment-index', String(idx + 1));
+                        e.dataTransfer.effectAllowed = 'copyMove';
+                      }}
+                      className="flex items-center space-x-2.5 px-3 py-2 bg-white dark:bg-slate-800 rounded-xl border border-blue-200 dark:border-blue-700 shadow-2xs hover:shadow-xs hover:border-blue-500 cursor-grab active:cursor-grabbing transition group select-none"
+                      title="Geser media ini ke dalam kotak teks soal untuk menempatkan posisinya"
+                    >
+                      <GripVertical className="w-3.5 h-3.5 text-blue-500 group-hover:text-blue-700 shrink-0" />
+                      <img
+                        src={normalizeGoogleDriveImageUrl(att.url)}
+                        alt={att.source || att.name}
+                        className="w-7 h-7 rounded object-cover border border-slate-200 dark:border-slate-700 shrink-0"
+                      />
+                      <div className="text-left leading-tight">
+                        <span className="text-xs font-bold text-slate-800 dark:text-slate-100 block">
+                          Gambar {idx + 1}
+                        </span>
+                        <span className="text-[10px] text-slate-500 dark:text-slate-400 block max-w-[160px] truncate">
+                          {att.source ? `Sumber: ${att.source}` : 'Geser ke teks'}
+                        </span>
+                      </div>
+                      <span className="text-[10px] font-semibold text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/40 px-1.5 py-0.5 rounded border border-blue-200 dark:border-blue-800">
+                        {`{{gambar:${idx + 1}}}`}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Quick LaTeX & Insert Table Toolbar */}
+            {editPermission.allowed && (
+              <div className="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 text-xs space-y-2">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 flex items-center space-x-1">
+                    <Code2 className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
+                    <span>Sisipkan Rumus Matematika (LaTeX):</span>
+                  </div>
+
+                  {/* Insert Table Buttons */}
+                  <div className="flex items-center space-x-1.5">
+                    <button
+                      type="button"
+                      onClick={() => insertTable(3, 3)}
+                      className="px-2 py-1 rounded bg-blue-50 dark:bg-blue-950/60 hover:bg-blue-100 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800 text-[11px] font-semibold flex items-center space-x-1 cursor-pointer"
+                      title="Sisipkan tabel Markdown 3x3 di posisi kursor"
+                    >
+                      <Table className="w-3.5 h-3.5" />
+                      <span>+ Tabel 3x3</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => insertTable(3, 2)}
+                      className="px-2 py-1 rounded bg-white dark:bg-slate-700 hover:bg-slate-100 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-600 text-[11px] font-medium cursor-pointer"
+                      title="Sisipkan tabel perbandingan 2 kolom"
+                    >
+                      <span>Tabel 2 Kolom</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => insertTable(4, 4)}
+                      className="px-2 py-1 rounded bg-white dark:bg-slate-700 hover:bg-slate-100 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-600 text-[11px] font-medium cursor-pointer"
+                      title="Sisipkan tabel 4x4"
+                    >
+                      <span>Tabel 4x4</span>
+                    </button>
+                  </div>
+                </div>
+
                 <div className="flex flex-wrap gap-1.5">
                   {[
                     { label: 'Pecahan \\frac{a}{b}', code: '$\\frac{a}{b}$' },
@@ -868,59 +1127,101 @@ export const QuestionEditor: React.FC = () => {
               </div>
             )}
 
-            {/* Question Prompt Textarea */}
-            <textarea
-              rows={5}
-              disabled={!editPermission.allowed}
-              value={prompt}
-              onChange={(e) => setPrompt(e.target.value)}
-              placeholder="Ketikkan teks soal di sini. Gunakan $formula$ untuk rumus inline atau $$formula$$ untuk rumus terpusat..."
-              className="w-full text-sm rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 p-3.5 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 leading-relaxed font-sans"
-            />
+            {/* Question Prompt Textarea with Ref for cursor position & Word Count Info */}
+            <div className="space-y-1.5">
+              <div className="relative">
+                <textarea
+                  ref={promptTextareaRef}
+                  rows={5}
+                  disabled={!editPermission.allowed}
+                  value={prompt}
+                  onChange={(e) => setPrompt(e.target.value)}
+                  onDragOver={(e) => {
+                    e.preventDefault();
+                    e.dataTransfer.dropEffect = 'copy';
+                    if (!isDraggingOverTextarea) setIsDraggingOverTextarea(true);
+                  }}
+                  onDragLeave={() => setIsDraggingOverTextarea(false)}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    setIsDraggingOverTextarea(false);
+                    const attIdxStr = e.dataTransfer.getData('text/attachment-index');
+                    const tagData = e.dataTransfer.getData('text/plain');
+                    const tagToInsert = attIdxStr ? `\n\n{{gambar:${attIdxStr}}}\n\n` : (tagData || '');
 
-            {/* Live Formula Preview Box */}
-            {showPreview && prompt && (
+                    if (tagToInsert && promptTextareaRef.current) {
+                      const textarea = promptTextareaRef.current;
+                      let insertPos = textarea.value.length;
+
+                      if (document.caretPositionFromPoint) {
+                        const pos = document.caretPositionFromPoint(e.clientX, e.clientY);
+                        if (pos) insertPos = pos.offset;
+                      } else if ((document as any).caretRangeFromPoint) {
+                        const range = (document as any).caretRangeFromPoint(e.clientX, e.clientY);
+                        if (range) insertPos = range.startOffset;
+                      } else if (textarea.selectionStart !== undefined) {
+                        insertPos = textarea.selectionStart;
+                      }
+
+                      const currentVal = prompt;
+                      const cleanTag = `{{gambar:${attIdxStr}}}`;
+                      let baseVal = currentVal;
+                      if (attIdxStr && baseVal.includes(cleanTag)) {
+                        const existingIdx = baseVal.indexOf(cleanTag);
+                        if (existingIdx !== -1 && existingIdx < insertPos) {
+                          insertPos = Math.max(0, insertPos - cleanTag.length);
+                        }
+                        baseVal = baseVal.replace(new RegExp(`\\s*\\{\\{gambar:${attIdxStr}\\}\\}\\s*`, 'g'), ' ').trim();
+                      }
+
+                      const newText = baseVal.slice(0, insertPos).trimEnd() + 
+                                      `\n\n{{gambar:${attIdxStr || 1}}}\n\n` + 
+                                      baseVal.slice(insertPos).trimStart();
+                      setPrompt(newText);
+                    }
+                  }}
+                  placeholder="Ketikkan teks soal di sini. Anda dapat menahan dan menggeser (drag) kartu media gambar di atas langsung ke baris teks ini..."
+                  className={`w-full text-sm rounded-xl border p-3.5 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 leading-relaxed font-sans transition ${
+                    isDraggingOverTextarea
+                      ? 'border-blue-500 ring-2 ring-blue-300 dark:ring-blue-800 bg-blue-50/20 dark:bg-blue-950/20'
+                      : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800'
+                  }`}
+                />
+
+                {isDraggingOverTextarea && (
+                  <div className="absolute inset-0 bg-blue-600/10 backdrop-blur-[1px] rounded-xl border-2 border-dashed border-blue-500 pointer-events-none flex items-center justify-center">
+                    <span className="px-3 py-1.5 rounded-lg bg-blue-600 text-white text-xs font-bold shadow-lg flex items-center space-x-1.5">
+                      <GripVertical className="w-4 h-4" />
+                      <span>Lepaskan di sini untuk menempatkan posisi gambar</span>
+                    </span>
+                  </div>
+                )}
+              </div>
+
+              {/* Word count & character counter bar */}
+              <div className="flex items-center justify-between text-[11px] text-slate-500 dark:text-slate-400 px-1 pt-0.5">
+                <div className="flex items-center space-x-2">
+                  <span className="font-semibold text-slate-700 dark:text-slate-300">
+                    Jumlah Kata: <strong className="text-blue-600 dark:text-blue-400 font-bold">{prompt.trim() ? prompt.trim().split(/\s+/).filter(Boolean).length : 0}</strong> kata
+                  </span>
+                  <span>•</span>
+                  <span>{prompt.length} karakter</span>
+                </div>
+                <div className="text-[10px] text-slate-400 hidden sm:block">
+                  Mendukung geser manual media, formula LaTeX, & tabel interaktif
+                </div>
+              </div>
+            </div>
+
+            {/* Live Formula, Table & Image Preview Box */}
+            {showPreview && (prompt || attachments.length > 0) && (
               <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-dashed border-slate-300 dark:border-slate-700 space-y-2">
                 <div className="flex items-center space-x-1.5 text-[11px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
                   <Sparkles className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
-                  <span>Pratinjau Teks & Rumus</span>
+                  <span>Pratinjau Teks Soal & Tata Letak Gambar</span>
                 </div>
-                <div className="bg-white dark:bg-slate-850 p-3.5 rounded-lg border border-slate-200 dark:border-slate-700">
-                  <LatexRenderer content={prompt} />
-                  {attachments.length > 0 && (
-                    <div className="mt-4 space-y-4">
-                      {attachments.map((att) => {
-                        const alignClass = 
-                          att.align === 'left' ? 'text-left' :
-                          att.align === 'right' ? 'text-right' :
-                          'text-center';
-
-                        const alignImgClass = 
-                          att.align === 'left' ? 'mr-auto ml-0' :
-                          att.align === 'right' ? 'ml-auto mr-0' :
-                          'mx-auto';
-
-                        const widthStyle = att.width ? `${att.width}%` : '100%';
-                        const resolvedUrl = normalizeGoogleDriveImageUrl(att.url);
-
-                        return (
-                          <div key={att.id} className={alignClass}>
-                            <img
-                              src={resolvedUrl}
-                              alt={att.name}
-                              referrerPolicy="no-referrer"
-                              crossOrigin="anonymous"
-                              loading="lazy"
-                              style={{ width: widthStyle }}
-                              className={`max-h-96 object-contain rounded border border-slate-200 dark:border-slate-700 ${alignImgClass}`}
-                              onError={(e) => handleDriveImageError(e, att.url)}
-                            />
-                            <p className="text-[10px] text-slate-400 mt-1 italic">{att.name}</p>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
+                <div className="bg-white dark:bg-slate-850 p-4 rounded-xl border border-slate-200 dark:border-slate-700">
+                  <QuestionPromptViewer prompt={prompt} attachments={attachments} />
                 </div>
               </div>
             )}
@@ -935,7 +1236,7 @@ export const QuestionEditor: React.FC = () => {
                 </h3>
                 <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
                   {type === 'pilihan_ganda' && 'Tipe Pilihan Ganda Tunggal: Kunci jawaban berbentuk lingkaran bulat (pilih satu opsi).'}
-                  {type === 'pilihan_ganda_kompleks' && 'Tipe Pilihan Ganda Kompleks: Kunci jawaban berbentuk persegi (pilih satu atau lebih opsi yang benar).'}
+                  {type === 'pilihan_ganda_kompleks' && 'Tipe Pilihan Ganda Kompleks: Kunci jawaban berupa kotak centang / checkbox (tanpa label a, b, c, d).'}
                   {type === 'benar_salah' && 'Tipe Benar / Salah: Dikelola dalam bentuk tabel terstruktur (Nomor, Pernyataan, Benar, Salah).'}
                   {type === 'menjodohkan' && 'Tipe Menjodohkan: Pasangan premis dan respon jawaban valid.'}
                   {type === 'isian_singkat' && 'Tipe Isian Singkat: Kata atau angka kunci valid.'}
@@ -946,7 +1247,7 @@ export const QuestionEditor: React.FC = () => {
               {type === 'pilihan_ganda_kompleks' && (
                 <div className="flex items-center space-x-1.5 px-2.5 py-1 rounded-md bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-300 dark:border-emerald-700 text-emerald-800 dark:text-emerald-300 text-xs font-semibold">
                   <Square className="w-3.5 h-3.5 fill-emerald-600 text-emerald-600" />
-                  <span>Kunci Persegi</span>
+                  <span>Check Box</span>
                 </div>
               )}
 
@@ -962,7 +1263,7 @@ export const QuestionEditor: React.FC = () => {
             {type === 'pilihan_ganda' && (
               <div className="space-y-3">
                 <div className="flex items-center justify-between text-xs text-slate-500 dark:text-slate-400">
-                  <span>Pilih satu lingkaran radio sebagai kunci jawaban yang benar:</span>
+                  <span>Pilih satu lingkaran radio sebagai kunci jawaban yang benar (Tersedia {options.length} opsi):</span>
                   {editPermission.allowed && (
                     <button
                       type="button"
@@ -978,78 +1279,153 @@ export const QuestionEditor: React.FC = () => {
                 {options.map((opt, idx) => (
                   <div
                     key={opt.id}
-                    className={`p-3 rounded-xl border transition flex items-start space-x-3 ${
+                    className={`p-3.5 rounded-xl border transition flex flex-col space-y-2.5 ${
                       opt.isCorrect
                         ? 'bg-emerald-50/60 dark:bg-emerald-950/40 border-emerald-300 dark:border-emerald-700 ring-1 ring-emerald-200 dark:ring-emerald-800'
                         : 'bg-slate-50/40 dark:bg-slate-800/40 border-slate-200 dark:border-slate-700'
                     }`}
                   >
-                    {/* Circle Radio for Pilihan Ganda */}
-                    <div className="pt-2">
-                      <input
-                        type="radio"
-                        name="correctOption"
-                        disabled={!editPermission.allowed}
-                        checked={opt.isCorrect}
-                        onChange={() => {
-                          setOptions((prev) =>
-                            prev.map((o) => ({
-                              ...o,
-                              isCorrect: o.id === opt.id,
-                            }))
-                          );
-                        }}
-                        className="w-4 h-4 text-emerald-600 rounded-full focus:ring-emerald-500 border-slate-300 cursor-pointer"
-                      />
-                    </div>
+                    <div className="flex items-start space-x-3">
+                      {/* Circle Radio for Pilihan Ganda */}
+                      <div className="pt-2">
+                        <input
+                          type="radio"
+                          name="correctOption"
+                          disabled={!editPermission.allowed}
+                          checked={opt.isCorrect}
+                          onChange={() => {
+                            setOptions((prev) =>
+                              prev.map((o) => ({
+                                ...o,
+                                isCorrect: o.id === opt.id,
+                              }))
+                            );
+                          }}
+                          className="w-4 h-4 text-emerald-600 rounded-full focus:ring-emerald-500 border-slate-300 cursor-pointer"
+                        />
+                      </div>
 
-                    <div className="w-7 h-7 rounded-full bg-slate-200 dark:bg-slate-700 font-bold text-slate-700 dark:text-slate-200 flex items-center justify-center text-xs shrink-0 mt-0.5">
-                      {opt.label}
-                    </div>
+                      <div className="w-7 h-7 rounded-full bg-slate-200 dark:bg-slate-700 font-bold text-slate-700 dark:text-slate-200 flex items-center justify-center text-xs shrink-0 mt-0.5">
+                        {opt.label}
+                      </div>
 
-                    <div className="flex-1 space-y-1.5">
-                      <input
-                        type="text"
-                        disabled={!editPermission.allowed}
-                        placeholder={`Teks pilihan ${opt.label} (mendukung $rumus$)`}
-                        value={opt.text}
-                        onChange={(e) => {
-                          const val = e.target.value;
-                          setOptions((prev) =>
-                            prev.map((o) => (o.id === opt.id ? { ...o, text: val } : o))
-                          );
-                        }}
-                        className="w-full text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-1.5 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                      />
-                      {opt.text && (opt.text.includes('$') || opt.text.includes('\\')) && (
-                        <div className="text-[11px] text-slate-600 dark:text-slate-300 bg-white/70 dark:bg-slate-800/80 px-2 py-0.5 rounded border border-slate-100 dark:border-slate-700">
-                          <LatexRenderer content={opt.text} />
-                        </div>
+                      <div className="flex-1 space-y-1.5">
+                        <input
+                          type="text"
+                          disabled={!editPermission.allowed}
+                          placeholder={`Teks pilihan ${opt.label} (mendukung $rumus$)`}
+                          value={opt.text}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            setOptions((prev) =>
+                              prev.map((o) => (o.id === opt.id ? { ...o, text: val } : o))
+                            );
+                          }}
+                          className="w-full text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-1.5 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        />
+                        {opt.text && (opt.text.includes('$') || opt.text.includes('\\')) && (
+                          <div className="text-[11px] text-slate-600 dark:text-slate-300 bg-white/70 dark:bg-slate-800/80 px-2 py-0.5 rounded border border-slate-100 dark:border-slate-700">
+                            <LatexRenderer content={opt.text} />
+                          </div>
+                        )}
+                      </div>
+
+                      {options.length > 2 && editPermission.allowed && (
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveOption(idx)}
+                          className="text-slate-400 hover:text-red-600 pt-2 transition cursor-pointer"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
                       )}
                     </div>
 
-                    {options.length > 2 && editPermission.allowed && (
-                      <button
-                        type="button"
-                        onClick={() => handleRemoveOption(idx)}
-                        className="text-slate-400 hover:text-red-600 pt-2 transition cursor-pointer"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
-                    )}
+                    {/* Gambar Opsi Jawaban (Input Gambar pada Opsi) */}
+                    <div className="pl-12 flex items-center space-x-3 text-xs">
+                      {opt.imageUrl ? (
+                        <div className="flex items-center space-x-2 p-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-850">
+                          <img
+                            src={normalizeGoogleDriveImageUrl(opt.imageUrl)}
+                            alt={`Gambar Opsi ${opt.label}`}
+                            className="w-12 h-12 object-contain rounded border border-slate-200 dark:border-slate-700"
+                            onError={(e) => handleDriveImageError(e, opt.imageUrl!)}
+                          />
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setOptions((prev) =>
+                                prev.map((o) => (o.id === opt.id ? { ...o, imageUrl: undefined } : o))
+                              )
+                            }
+                            className="text-[11px] text-rose-600 dark:text-rose-400 hover:underline cursor-pointer"
+                          >
+                            Hapus Gambar Opsi
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="flex items-center space-x-2">
+                          <input
+                            type="file"
+                            id={`file-opt-${opt.id}`}
+                            className="hidden"
+                            accept="image/*"
+                            onChange={async (e) => {
+                              const file = e.target.files?.[0];
+                              if (!file) return;
+                              try {
+                                const res = await uploadMediaToDriveOrFallback(file, undefined, {
+                                  gasWebhookUrl: gasWebhookUrl || undefined,
+                                  folderId: TKAD_DRIVE_FOLDER_ID,
+                                });
+                                setOptions((prev) =>
+                                  prev.map((o) => (o.id === opt.id ? { ...o, imageUrl: res.url } : o))
+                                );
+                              } catch (err: any) {
+                                alert('Gagal mengunggah gambar opsi: ' + err.message);
+                              } finally {
+                                e.target.value = '';
+                              }
+                            }}
+                          />
+                          <label
+                            htmlFor={`file-opt-${opt.id}`}
+                            className="px-2.5 py-1 rounded-md bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 text-[10px] font-semibold flex items-center space-x-1 cursor-pointer transition"
+                            title="Unggah berkas gambar untuk opsi ini"
+                          >
+                            <ImageIcon className="w-3 h-3 text-blue-500" />
+                            <span>+ Sisipkan Gambar Opsi</span>
+                          </label>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const url = prompt('Tempelkan URL gambar untuk Opsi ' + opt.label + ':');
+                              if (url && url.trim()) {
+                                setOptions((prev) =>
+                                  prev.map((o) => (o.id === opt.id ? { ...o, imageUrl: url.trim() } : o))
+                                );
+                              }
+                            }}
+                            className="text-[10px] text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 underline cursor-pointer"
+                          >
+                            Tempel URL
+                          </button>
+                        </div>
+                      )}
+                    </div>
                   </div>
                 ))}
               </div>
             )}
 
-            {/* Case: Pilihan Ganda Kompleks (Multi - STRICT SQUARE SHAPE) */}
+            {/* Case: Pilihan Ganda Kompleks (Multi - STRICT SQUARE SHAPE WITHOUT A, B, C, D) */}
             {type === 'pilihan_ganda_kompleks' && (
               <div className="space-y-3">
                 <div className="p-3 bg-emerald-50/50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800 rounded-xl flex items-center justify-between text-xs text-emerald-900 dark:text-emerald-200">
                   <div className="flex items-center space-x-2">
                     <Square className="w-4 h-4 fill-emerald-600 text-emerald-600 shrink-0" />
                     <span className="font-semibold">
-                      Tampilan Kunci Persegi: Centang kotak persegi untuk semua opsi jawaban yang benar.
+                      Tampilan Check Box (Tanpa a, b, c, d): Centang kotak untuk semua opsi yang benar. Tersedia {options.length} opsi.
                     </span>
                   </div>
                   {editPermission.allowed && (
@@ -1067,78 +1443,142 @@ export const QuestionEditor: React.FC = () => {
                 {options.map((opt, idx) => (
                   <div
                     key={opt.id}
-                    className={`p-3.5 rounded-none border-2 transition flex items-start space-x-3.5 ${
+                    className={`p-3.5 rounded-xl border-2 transition flex flex-col space-y-2.5 ${
                       opt.isCorrect
                         ? 'bg-emerald-50/80 dark:bg-emerald-950/60 border-emerald-500 dark:border-emerald-600 shadow-2xs'
                         : 'bg-slate-50/40 dark:bg-slate-800/40 border-slate-300 dark:border-slate-700'
                     }`}
                   >
-                    {/* STRICT SQUARE CHECKBOX */}
-                    <div className="pt-1.5">
-                      <button
-                        type="button"
-                        disabled={!editPermission.allowed}
-                        onClick={() => {
-                          setOptions((prev) =>
-                            prev.map((o) =>
-                              o.id === opt.id ? { ...o, isCorrect: !o.isCorrect } : o
-                            )
-                          );
-                        }}
-                        className={`w-5 h-5 rounded-none border-2 flex items-center justify-center transition cursor-pointer ${
-                          opt.isCorrect
-                            ? 'bg-emerald-600 border-emerald-700 text-white shadow-2xs'
-                            : 'bg-white dark:bg-slate-800 border-slate-400 dark:border-slate-500 hover:border-emerald-500'
-                        }`}
-                        title={opt.isCorrect ? 'Kunci Benar (Klik untuk batal)' : 'Klik untuk jadikan kunci'}
-                      >
-                        {opt.isCorrect && (
-                          <span className="font-black text-xs leading-none">✓</span>
+                    <div className="flex items-start space-x-3.5">
+                      {/* STRICT SQUARE CHECKBOX ONLY (NO A, B, C, D) */}
+                      <div className="pt-1">
+                        <button
+                          type="button"
+                          disabled={!editPermission.allowed}
+                          onClick={() => {
+                            setOptions((prev) =>
+                              prev.map((o) =>
+                                o.id === opt.id ? { ...o, isCorrect: !o.isCorrect } : o
+                              )
+                            );
+                          }}
+                          className={`w-6 h-6 rounded-md border-2 flex items-center justify-center transition cursor-pointer ${
+                            opt.isCorrect
+                              ? 'bg-emerald-600 border-emerald-700 text-white shadow-xs'
+                              : 'bg-white dark:bg-slate-800 border-slate-400 dark:border-slate-500 hover:border-emerald-500'
+                          }`}
+                          title={opt.isCorrect ? 'Kunci Benar (Klik untuk batal)' : 'Klik untuk jadikan kunci'}
+                        >
+                          {opt.isCorrect && (
+                            <span className="font-black text-sm leading-none">✓</span>
+                          )}
+                        </button>
+                      </div>
+
+                      <div className="flex-1 space-y-1.5">
+                        <input
+                          type="text"
+                          disabled={!editPermission.allowed}
+                          placeholder={`Teks pernyataan opsi pilihan... (mendukung $rumus$)`}
+                          value={opt.text}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            setOptions((prev) =>
+                              prev.map((o) => (o.id === opt.id ? { ...o, text: val } : o))
+                            );
+                          }}
+                          className="w-full text-xs rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 px-3 py-1.5 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                        />
+                        {opt.text && (opt.text.includes('$') || opt.text.includes('\\')) && (
+                          <div className="text-[11px] text-slate-600 dark:text-slate-300 bg-white/70 dark:bg-slate-800/80 px-2 py-0.5 rounded border border-slate-200 dark:border-slate-700">
+                            <LatexRenderer content={opt.text} />
+                          </div>
                         )}
-                      </button>
-                    </div>
+                      </div>
 
-                    {/* STRICT SQUARE LABEL BADGE */}
-                    <div
-                      className={`w-7 h-7 rounded-none font-bold flex items-center justify-center text-xs shrink-0 border ${
-                        opt.isCorrect
-                          ? 'bg-emerald-600 border-emerald-700 text-white'
-                          : 'bg-slate-200 dark:bg-slate-700 border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-200'
-                      }`}
-                    >
-                      [{opt.label}]
-                    </div>
-
-                    <div className="flex-1 space-y-1.5">
-                      <input
-                        type="text"
-                        disabled={!editPermission.allowed}
-                        placeholder={`Teks pilihan ${opt.label} (mendukung $rumus$)`}
-                        value={opt.text}
-                        onChange={(e) => {
-                          const val = e.target.value;
-                          setOptions((prev) =>
-                            prev.map((o) => (o.id === opt.id ? { ...o, text: val } : o))
-                          );
-                        }}
-                        className="w-full text-xs rounded-none border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 px-3 py-1.5 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                      />
-                      {opt.text && (opt.text.includes('$') || opt.text.includes('\\')) && (
-                        <div className="text-[11px] text-slate-600 dark:text-slate-300 bg-white/70 dark:bg-slate-800/80 px-2 py-0.5 rounded-none border border-slate-200 dark:border-slate-700">
-                          <LatexRenderer content={opt.text} />
-                        </div>
+                      {options.length > 2 && editPermission.allowed && (
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveOption(idx)}
+                          className="text-slate-400 hover:text-red-600 pt-1 transition cursor-pointer"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
                       )}
                     </div>
 
-                    {options.length > 2 && editPermission.allowed && (
-                      <button
-                        type="button"
-                        onClick={() => handleRemoveOption(idx)}
-                        className="text-slate-400 hover:text-red-600 pt-2 transition cursor-pointer"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
-                    )}
+                    {/* Gambar Opsi Jawaban untuk PG Kompleks */}
+                    <div className="pl-9 flex items-center space-x-3 text-xs">
+                      {opt.imageUrl ? (
+                        <div className="flex items-center space-x-2 p-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-850">
+                          <img
+                            src={normalizeGoogleDriveImageUrl(opt.imageUrl)}
+                            alt="Gambar Opsi"
+                            className="w-12 h-12 object-contain rounded border border-slate-200 dark:border-slate-700"
+                            onError={(e) => handleDriveImageError(e, opt.imageUrl!)}
+                          />
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setOptions((prev) =>
+                                prev.map((o) => (o.id === opt.id ? { ...o, imageUrl: undefined } : o))
+                              )
+                            }
+                            className="text-[11px] text-rose-600 dark:text-rose-400 hover:underline cursor-pointer"
+                          >
+                            Hapus Gambar Opsi
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="flex items-center space-x-2">
+                          <input
+                            type="file"
+                            id={`file-opt-komp-${opt.id}`}
+                            className="hidden"
+                            accept="image/*"
+                            onChange={async (e) => {
+                              const file = e.target.files?.[0];
+                              if (!file) return;
+                              try {
+                                const res = await uploadMediaToDriveOrFallback(file, undefined, {
+                                  gasWebhookUrl: gasWebhookUrl || undefined,
+                                  folderId: TKAD_DRIVE_FOLDER_ID,
+                                });
+                                setOptions((prev) =>
+                                  prev.map((o) => (o.id === opt.id ? { ...o, imageUrl: res.url } : o))
+                                );
+                              } catch (err: any) {
+                                alert('Gagal mengunggah gambar opsi: ' + err.message);
+                              } finally {
+                                e.target.value = '';
+                              }
+                            }}
+                          />
+                          <label
+                            htmlFor={`file-opt-komp-${opt.id}`}
+                            className="px-2.5 py-1 rounded-md bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 text-[10px] font-semibold flex items-center space-x-1 cursor-pointer transition"
+                            title="Unggah gambar untuk opsi ini"
+                          >
+                            <ImageIcon className="w-3 h-3 text-blue-500" />
+                            <span>+ Sisipkan Gambar Opsi</span>
+                          </label>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const url = prompt('Tempelkan URL gambar untuk opsi ini:');
+                              if (url && url.trim()) {
+                                setOptions((prev) =>
+                                  prev.map((o) => (o.id === opt.id ? { ...o, imageUrl: url.trim() } : o))
+                                );
+                              }
+                            }}
+                            className="text-[10px] text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 underline cursor-pointer"
+                          >
+                            Tempel URL
+                          </button>
+                        </div>
+                      )}
+                    </div>
                   </div>
                 ))}
               </div>

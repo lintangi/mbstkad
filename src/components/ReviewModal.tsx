@@ -11,11 +11,14 @@ import {
   Sparkles,
   MessageSquare,
   FileCheck,
+  Square,
+  Table as TableIcon,
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
-import { ReviewCriteriaRating } from '../types';
+import { ReviewCriteriaRating, ChoiceOption, TrueFalseItem, MatchingPair } from '../types';
 import { LatexRenderer } from '../utils/latexParser';
 import { normalizeGoogleDriveImageUrl, handleDriveImageError } from '../utils/googleDriveUtils';
+import { QuestionPromptViewer } from './QuestionPromptViewer';
 
 export const ReviewModal: React.FC = () => {
   const {
@@ -102,64 +105,208 @@ export const ReviewModal: React.FC = () => {
             </div>
 
             <div className="text-sm text-slate-900 dark:text-slate-100 leading-relaxed font-sans bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800">
-              <LatexRenderer content={question.prompt} />
-              {question.attachments.length > 0 && (
-                <div className="mt-4 space-y-4">
-                  {question.attachments.map((att) => {
-                    const alignClass = 
-                      att.align === 'left' ? 'text-left' :
-                      att.align === 'right' ? 'text-right' :
-                      'text-center';
-
-                    const alignImgClass = 
-                      att.align === 'left' ? 'mr-auto ml-0' :
-                      att.align === 'right' ? 'ml-auto mr-0' :
-                      'mx-auto';
-
-                    const widthStyle = att.width ? `${att.width}%` : '100%';
-                    const resolvedUrl = normalizeGoogleDriveImageUrl(att.url);
-
-                    return (
-                      <div key={att.id} className={alignClass}>
-                        <img
-                          src={resolvedUrl}
-                          alt={att.name}
-                          referrerPolicy="no-referrer"
-                          crossOrigin="anonymous"
-                          loading="lazy"
-                          style={{ width: widthStyle }}
-                          className={`max-h-72 object-contain rounded border border-slate-200 dark:border-slate-700 ${alignImgClass}`}
-                          onError={(e) => handleDriveImageError(e, att.url)}
-                        />
-                        <span className="text-[10px] text-slate-400 mt-1 block italic">{att.name}</span>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
+              <QuestionPromptViewer prompt={question.prompt} attachments={question.attachments} />
             </div>
 
-            {/* Answer Key preview */}
-            {question.options && (
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
-                {question.options.map((opt) => (
-                  <div
-                    key={opt.id}
-                    className={`p-2.5 rounded-lg border flex items-center space-x-2 ${
-                      opt.isCorrect
-                        ? 'bg-emerald-50 dark:bg-emerald-950/40 border-emerald-300 dark:border-emerald-700 font-semibold text-emerald-900 dark:text-emerald-200'
-                        : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-slate-800 dark:text-slate-200'
-                    }`}
-                  >
-                    <span className="w-5 h-5 rounded font-bold bg-slate-100 dark:bg-slate-800 flex items-center justify-center text-xs text-slate-700 dark:text-slate-300">
-                      {opt.label}
-                    </span>
-                    <div className="flex-1 truncate">
-                      <LatexRenderer content={opt.text} />
+            {/* Answer Keys & Options Preview by Question Type */}
+            {/* 1. Pilihan Ganda Biasa */}
+            {question.type === 'pilihan_ganda' && question.options && question.options.length > 0 && (
+              <div className="space-y-2">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500 block">
+                  Kunci Jawaban Pilihan Ganda Tunggal (Radio):
+                </span>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+                  {question.options.map((opt) => (
+                    <div
+                      key={opt.id}
+                      className={`p-2.5 rounded-lg border flex flex-col space-y-1.5 ${
+                        opt.isCorrect
+                          ? 'bg-emerald-50 dark:bg-emerald-950/40 border-emerald-300 dark:border-emerald-700 font-semibold text-emerald-900 dark:text-emerald-200'
+                          : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-slate-800 dark:text-slate-200'
+                      }`}
+                    >
+                      <div className="flex items-center space-x-2">
+                        <span className={`w-5 h-5 rounded-full font-bold flex items-center justify-center text-xs shrink-0 ${
+                          opt.isCorrect ? 'bg-emerald-600 text-white' : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300'
+                        }`}>
+                          {opt.label}
+                        </span>
+                        <div className="flex-1">
+                          <LatexRenderer content={opt.text} />
+                        </div>
+                        {opt.isCorrect && <CheckCircle className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />}
+                      </div>
+                      {opt.imageUrl && (
+                        <div className="pl-7">
+                          <img
+                            src={normalizeGoogleDriveImageUrl(opt.imageUrl)}
+                            alt={`Gambar Opsi ${opt.label}`}
+                            className="max-h-24 rounded border border-slate-200 dark:border-slate-700 object-contain"
+                            onError={(e) => handleDriveImageError(e, opt.imageUrl!)}
+                          />
+                        </div>
+                      )}
                     </div>
-                    {opt.isCorrect && <CheckCircle className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />}
-                  </div>
-                ))}
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* 2. Pilihan Ganda Kompleks (TANPA A, B, C, D - HANYA CHECK BOX) */}
+            {question.type === 'pilihan_ganda_kompleks' && question.options && question.options.length > 0 && (
+              <div className="space-y-2">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500 block">
+                  Kunci Jawaban Pilihan Ganda Kompleks (Format Check Box Tanpa a, b, c, d):
+                </span>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+                  {question.options.map((opt) => (
+                    <div
+                      key={opt.id}
+                      className={`p-2.5 rounded-lg border-2 flex flex-col space-y-1.5 ${
+                        opt.isCorrect
+                          ? 'bg-emerald-50 dark:bg-emerald-950/40 border-emerald-500 dark:border-emerald-600 font-semibold text-emerald-900 dark:text-emerald-200 shadow-2xs'
+                          : 'bg-white dark:bg-slate-900 border-slate-300 dark:border-slate-700 text-slate-800 dark:text-slate-200'
+                      }`}
+                    >
+                      <div className="flex items-center space-x-2">
+                        {/* Strictly Checkbox square without A, B, C, D */}
+                        <div className={`w-5 h-5 rounded-md border-2 flex items-center justify-center text-xs shrink-0 ${
+                          opt.isCorrect ? 'bg-emerald-600 border-emerald-700 text-white' : 'border-slate-400 dark:border-slate-600 bg-white dark:bg-slate-800'
+                        }`}>
+                          {opt.isCorrect && <span>✓</span>}
+                        </div>
+                        <div className="flex-1">
+                          <LatexRenderer content={opt.text} />
+                        </div>
+                        {opt.isCorrect && (
+                          <span className="text-[10px] bg-emerald-100 dark:bg-emerald-900/60 text-emerald-800 dark:text-emerald-200 px-1.5 py-0.5 rounded font-bold">
+                            Kunci
+                          </span>
+                        )}
+                      </div>
+                      {opt.imageUrl && (
+                        <div className="pl-7">
+                          <img
+                            src={normalizeGoogleDriveImageUrl(opt.imageUrl)}
+                            alt="Gambar Opsi"
+                            className="max-h-24 rounded border border-slate-200 dark:border-slate-700 object-contain"
+                            onError={(e) => handleDriveImageError(e, opt.imageUrl!)}
+                          />
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* 3. Benar / Salah (FORMAT TABEL DI SEMUA ROLE) */}
+            {question.type === 'benar_salah' && question.trueFalseItems && question.trueFalseItems.length > 0 && (
+              <div className="space-y-2">
+                <div className="flex items-center space-x-1.5 text-xs text-blue-700 dark:text-blue-300 font-semibold">
+                  <TableIcon className="w-3.5 h-3.5" />
+                  <span>Kunci Evaluasi Benar / Salah (Format Tabel):</span>
+                </div>
+                <div className="overflow-x-auto border border-slate-200 dark:border-slate-700 rounded-xl bg-white dark:bg-slate-900 shadow-2xs">
+                  <table className="w-full text-left border-collapse text-xs">
+                    <thead>
+                      <tr className="bg-slate-100 dark:bg-slate-800/80 text-slate-700 dark:text-slate-200 border-b border-slate-200 dark:border-slate-700">
+                        <th className="py-2.5 px-3 font-bold w-12 text-center">No</th>
+                        <th className="py-2.5 px-3 font-bold">Pernyataan Evaluasi</th>
+                        <th className="py-2.5 px-3 font-bold w-24 text-center bg-emerald-50/50 dark:bg-emerald-950/30 text-emerald-800 dark:text-emerald-300 border-l border-slate-200 dark:border-slate-700">
+                          Benar (B)
+                        </th>
+                        <th className="py-2.5 px-3 font-bold w-24 text-center bg-rose-50/50 dark:bg-rose-950/30 text-rose-800 dark:text-rose-300 border-l border-slate-200 dark:border-slate-700">
+                          Salah (S)
+                        </th>
+                        <th className="py-2.5 px-3 font-bold w-28 text-center border-l border-slate-200 dark:border-slate-700">
+                          Kunci Valid
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                      {question.trueFalseItems.map((tf, idx) => (
+                        <tr key={tf.id || idx} className="hover:bg-slate-50/70 dark:hover:bg-slate-850/70">
+                          <td className="py-2.5 px-3 text-center font-bold text-slate-500 dark:text-slate-400">
+                            {idx + 1}
+                          </td>
+                          <td className="py-2.5 px-3 text-slate-800 dark:text-slate-200">
+                            <LatexRenderer content={tf.statement} />
+                          </td>
+                          <td className="py-2.5 px-3 text-center border-l border-slate-200 dark:border-slate-700 bg-emerald-50/20 dark:bg-emerald-950/20">
+                            {tf.correctAnswer ? (
+                              <span className="inline-block w-6 h-6 rounded-full bg-emerald-600 text-white font-bold text-xs leading-6">✓</span>
+                            ) : (
+                              <span className="text-slate-300 dark:text-slate-600">-</span>
+                            )}
+                          </td>
+                          <td className="py-2.5 px-3 text-center border-l border-slate-200 dark:border-slate-700 bg-rose-50/20 dark:bg-rose-950/20">
+                            {!tf.correctAnswer ? (
+                              <span className="inline-block w-6 h-6 rounded-full bg-rose-600 text-white font-bold text-xs leading-6">✓</span>
+                            ) : (
+                              <span className="text-slate-300 dark:text-slate-600">-</span>
+                            )}
+                          </td>
+                          <td className="py-2.5 px-3 text-center border-l border-slate-200 dark:border-slate-700 font-bold">
+                            <span className={`px-2.5 py-1 rounded-md text-[11px] font-bold ${
+                              tf.correctAnswer
+                                ? 'bg-emerald-100 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300'
+                                : 'bg-rose-100 dark:bg-rose-950/60 text-rose-800 dark:text-rose-300'
+                            }`}>
+                              {tf.correctAnswer ? 'BENAR' : 'SALAH'}
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
+            {/* 4. Menjodohkan */}
+            {question.type === 'menjodohkan' && question.matchingPairs && question.matchingPairs.length > 0 && (
+              <div className="space-y-2">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500 block">
+                  Pasangan Kunci Menjodohkan:
+                </span>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+                  {question.matchingPairs.map((pair, idx) => (
+                    <div key={pair.id || idx} className="p-3 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800">
+                      <span className="font-bold text-slate-400 block text-[10px] mb-1">Premis #{idx + 1}:</span>
+                      <div className="text-slate-800 dark:text-slate-200">
+                        <LatexRenderer content={pair.premise} />
+                      </div>
+                      <div className="mt-2 pt-2 border-t border-slate-100 dark:border-slate-800 text-emerald-700 dark:text-emerald-400 font-semibold">
+                        Pasangan: <LatexRenderer content={pair.response} />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* 5. Isian Singkat */}
+            {question.type === 'isian_singkat' && (
+              <div className="p-3 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 text-xs">
+                <span className="font-bold text-slate-400 dark:text-slate-500 text-[10px] uppercase block mb-1">
+                  Kunci Isian Singkat Valid:
+                </span>
+                <p className="font-mono text-emerald-700 dark:text-emerald-400 font-bold text-sm bg-emerald-50 dark:bg-emerald-950/40 p-2 rounded-lg border border-emerald-200 dark:border-emerald-800">
+                  {question.shortAnswerKey || '-'}
+                </p>
+              </div>
+            )}
+
+            {/* 6. Esai */}
+            {question.type === 'esai' && (
+              <div className="p-3 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 text-xs">
+                <span className="font-bold text-slate-400 dark:text-slate-500 text-[10px] uppercase block mb-1">
+                  Rubrik Penilaian Esai:
+                </span>
+                <div className="text-slate-800 dark:text-slate-200 whitespace-pre-line">
+                  {question.essayRubric || '-'}
+                </div>
               </div>
             )}
 
@@ -252,8 +399,8 @@ export const ReviewModal: React.FC = () => {
               />
             </div>
 
-            {/* Optional per-option comments toggle */}
-            {question.options && question.options.length > 0 && (
+            {/* Optional per-option / per-statement comments toggle */}
+            {((question.options && question.options.length > 0) || (question.trueFalseItems && question.trueFalseItems.length > 0)) && (
               <div className="pt-2">
                 <button
                   type="button"
@@ -261,22 +408,49 @@ export const ReviewModal: React.FC = () => {
                   className="text-xs text-blue-600 dark:text-blue-400 hover:underline font-medium flex items-center space-x-1 cursor-pointer"
                 >
                   <MessageSquare className="w-3.5 h-3.5" />
-                  <span>{showOptionComments ? 'Tutup Catatan per Opsi' : '+ Tambah Catatan Khusus per Opsi Jawaban'}</span>
+                  <span>{showOptionComments ? 'Tutup Catatan Rinci per Pilihan' : '+ Tambah Catatan Khusus per Pilihan / Pernyataan'}</span>
                 </button>
 
                 {showOptionComments && (
                   <div className="mt-3 space-y-2 pt-2 border-t border-slate-100 dark:border-slate-800">
-                    {question.options.map((opt) => (
+                    {question.type !== 'benar_salah' && question.options && question.options.map((opt, idx) => (
                       <div key={opt.id} className="flex items-center space-x-2 text-xs">
-                        <span className="w-6 h-6 rounded bg-slate-100 dark:bg-slate-800 flex items-center justify-center font-bold text-slate-600 dark:text-slate-300">
-                          {opt.label}
-                        </span>
+                        {question.type === 'pilihan_ganda_kompleks' ? (
+                          <span className="w-6 h-6 rounded bg-emerald-50 dark:bg-emerald-950 border border-emerald-300 dark:border-emerald-700 flex items-center justify-center font-bold text-emerald-700 dark:text-emerald-300 text-[10px]">
+                            #{idx + 1}
+                          </span>
+                        ) : (
+                          <span className="w-6 h-6 rounded bg-slate-100 dark:bg-slate-800 flex items-center justify-center font-bold text-slate-600 dark:text-slate-300">
+                            {opt.label}
+                          </span>
+                        )}
                         <input
                           type="text"
-                          placeholder={`Catatan spesifik untuk Opsi ${opt.label}...`}
+                          placeholder={
+                            question.type === 'pilihan_ganda_kompleks'
+                              ? `Catatan spesifik untuk Opsi #${idx + 1}...`
+                              : `Catatan spesifik untuk Opsi ${opt.label}...`
+                          }
                           value={optionComments[opt.id] || ''}
                           onChange={(e) =>
                             setOptionComments({ ...optionComments, [opt.id]: e.target.value })
+                          }
+                          className="flex-1 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-3 py-1.5 text-xs text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        />
+                      </div>
+                    ))}
+
+                    {question.type === 'benar_salah' && question.trueFalseItems && question.trueFalseItems.map((tf, idx) => (
+                      <div key={tf.id} className="flex items-center space-x-2 text-xs">
+                        <span className="w-6 h-6 rounded bg-blue-50 dark:bg-blue-950 border border-blue-300 dark:border-blue-700 flex items-center justify-center font-bold text-blue-700 dark:text-blue-300 text-[10px]">
+                          #{idx + 1}
+                        </span>
+                        <input
+                          type="text"
+                          placeholder={`Catatan untuk pernyataan #${idx + 1}...`}
+                          value={optionComments[tf.id] || ''}
+                          onChange={(e) =>
+                            setOptionComments({ ...optionComments, [tf.id]: e.target.value })
                           }
                           className="flex-1 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-3 py-1.5 text-xs text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
                         />

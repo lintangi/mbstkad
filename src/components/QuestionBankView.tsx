@@ -23,6 +23,7 @@ import {
   CheckSquare,
   Square,
   Layers,
+  ShieldCheck,
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { extractDriveFileId } from '../utils/googleDriveUtils';
@@ -38,6 +39,7 @@ export const QuestionBankView: React.FC = () => {
     categories,
     setSelectedQuestionId,
     setEditingQuestionId,
+    setReviewingQuestionId,
     duplicateQuestion,
     deleteQuestion,
     bulkDeleteQuestions,
@@ -597,6 +599,15 @@ export const QuestionBankView: React.FC = () => {
 
                       {/* Actions */}
                       <td className="px-4 py-3 whitespace-nowrap text-right space-x-1">
+                        {(currentUser.role === 'reviewer' || currentUser.role === 'admin' || currentUser.roles?.includes('reviewer')) && (
+                          <button
+                            onClick={() => setReviewingQuestionId(q.id)}
+                            className="p-1.5 text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-950/60 rounded-lg transition cursor-pointer"
+                            title="Telaah / Evaluasi Mutu Soal Ini"
+                          >
+                            <ShieldCheck className="w-3.5 h-3.5" />
+                          </button>
+                        )}
                         <button
                           onClick={() => setSelectedQuestionId(q.id)}
                           className="p-1.5 text-slate-500 dark:text-slate-400 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition cursor-pointer"
@@ -702,6 +713,16 @@ export const QuestionBankView: React.FC = () => {
                 <div className="pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between">
                   <span className="text-[10px] text-slate-400 dark:text-slate-500">Oleh: {q.createdByName}</span>
                   <div className="flex items-center space-x-1">
+                    {(currentUser.role === 'reviewer' || currentUser.role === 'admin' || currentUser.roles?.includes('reviewer')) && (
+                      <button
+                        onClick={() => setReviewingQuestionId(q.id)}
+                        className="px-2.5 py-1 text-xs font-semibold bg-blue-50 dark:bg-blue-950/60 hover:bg-blue-100 dark:hover:bg-blue-900/60 text-blue-700 dark:text-blue-300 rounded-lg border border-blue-200 dark:border-blue-800 transition cursor-pointer flex items-center space-x-1"
+                        title="Telaah / Evaluasi Mutu Soal Ini"
+                      >
+                        <ShieldCheck className="w-3 h-3" />
+                        <span>Telaah</span>
+                      </button>
+                    )}
                     <button
                       onClick={() => setSelectedQuestionId(q.id)}
                       className="px-2.5 py-1 text-xs font-semibold bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 rounded-lg transition cursor-pointer"

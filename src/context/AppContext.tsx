@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
 import {
   Question,
   User,
@@ -167,6 +167,11 @@ interface AppContextType {
   syncWithGoogleSheets: (options?: { silent?: boolean }) => Promise<{ success: boolean; message: string }>;
   pullFromGoogleSheets: () => Promise<{ success: boolean; message: string; count?: number }>;
 
+  // Google Sheets Sync Periodic Countdown (Every 300 seconds from Firestore)
+  sheetsSyncCountdown: number;
+  sheetsSyncInterval: number;
+  triggerImmediateSheetsSync: () => Promise<{ success: boolean; message: string }>;
+
   // Dual Database (Firebase Firestore + Google Sheets)
   dualSyncStatus: 'idle' | 'syncing' | 'success' | 'error';
   isDualSyncing: boolean;
@@ -198,6 +203,7 @@ const STORAGE_KEY_AUTOSYNC = 'tkad_autosync_v3';
 
 export const DEFAULT_SPREADSHEET_ID = '1_x0C-IXWdcq9wCS2PyIPtOvqKRi4XSfaxomgIDPhQiM';
 export const DEFAULT_GAS_URL = 'https://script.google.com/macros/s/AKfycbwuzxjvozD_SCeCbLVnsBZzAbqYHpTk4XyBxZqYJAJaOe0bVrUYAikrRYsQ8oHOE5hH/exec';
+export const SHEETS_SYNC_INTERVAL_SECONDS = 300; // Siklus pengiriman data dari Firestore ke Google Spreadsheets tiap 300 detik
 
 const PREV_DEFAULT_SPREADSHEET_IDS = [
   '1BZl4MaFe-8F7dsH93NcJdKOAspWqJs3K5-dg5WT9z5c',
@@ -597,11 +603,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [autoSyncEnabled, setAutoSyncEnabled] = useState<boolean>(() => {
     try {
       const saved = localStorage.getItem(STORAGE_KEY_AUTOSYNC);
-      return saved !== null ? saved === 'true' : false;
+      return saved !== null ? saved === 'true' : true; // Default true agar siklus sinkronisasi 300 detik aktif
     } catch {
-      return false;
+      return true;
     }
   });
+  const [sheetsSyncCountdown, setSheetsSyncCountdown] = useState<number>(SHEETS_SYNC_INTERVAL_SECONDS);
   const [isSyncing, setIsSyncing] = useState<boolean>(false);
   const [syncStatus, setSyncStatus] = useState<'idle' | 'syncing' | 'success' | 'error'>('idle');
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
@@ -681,14 +688,24 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   useEffect(() => {
     testFirestoreConnection();
 
-    // Listen for Questions from Firestore
+    // Listen for Questions from Firestore (Basis Data Utama)
     const unsubQuestions = onSnapshot(
       collection(db, 'questions'),
-      (snapshot) => {
+      async (snapshot) => {
         if (!snapshot.empty) {
           const list: Question[] = [];
           snapshot.forEach((d) => list.push(d.data() as Question));
           setQuestions(list);
+        } else {
+          // Firestore masih kosong: lakukan seeding data awal ke Firestore sebagai basis data utama
+          console.log('Seeding INITIAL_QUESTIONS ke Firebase Firestore (Basis Data Utama)...');
+          for (const q of INITIAL_QUESTIONS) {
+            try {
+              await setDoc(doc(db, 'questions', q.id), sanitizeForFirestore(q));
+            } catch (err) {
+              console.warn('Seeding initial question error:', err);
+            }
+          }
         }
       },
       (error) => {
@@ -735,6 +752,25 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             .catch(err => console.error("Failed seeding root administrator:", err));
         } else {
           setUsers(list);
+          const savedUserId = typeof window !== 'undefined' ? localStorage.getItem(STORAGE_KEY_USER_ID) : null;
+          setCurrentUser((prevCurrent) => {
+            if (savedUserId) {
+              const matchedSaved = list.find((u) => u.id === savedUserId);
+              if (matchedSaved) {
+                return matchedSaved;
+              }
+            }
+            if (!prevCurrent) return prevCurrent;
+            const matched = list.find(
+              (u) =>
+                u.id === prevCurrent.id ||
+                u.email.trim().toLowerCase() === prevCurrent.email.trim().toLowerCase()
+            );
+            if (matched) {
+              return matched;
+            }
+            return prevCurrent;
+          });
         }
       },
       (error) => {
@@ -745,11 +781,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     // Listen for Categories from Firestore
     const unsubCategories = onSnapshot(
       collection(db, 'categories'),
-      (snapshot) => {
+      async (snapshot) => {
         if (!snapshot.empty) {
           const list: CategoryMetadata[] = [];
           snapshot.forEach((d) => list.push(d.data() as CategoryMetadata));
           setCategories(list);
+        } else {
+          for (const cat of INITIAL_CATEGORIES) {
+            try {
+              await setDoc(doc(db, 'categories', cat.id), sanitizeForFirestore(cat));
+            } catch (err) {
+              console.warn('Seeding category error:', err);
+            }
+          }
         }
       },
       (error) => {
@@ -788,17 +832,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
     );
 
-    // Listen for Notifications from Firestore (only unread ones should be shown)
+    // Listen for Notifications from Firestore (keep both unread and read notifications until user explicitly deletes them)
     const unsubNotifs = onSnapshot(
       collection(db, 'notifications'),
       (snapshot) => {
         if (!snapshot.empty) {
           const list: AppNotification[] = [];
           snapshot.forEach((d) => {
-            const notif = d.data() as AppNotification;
-            if (!notif.read) {
-              list.push(notif);
-            }
+            list.push(d.data() as AppNotification);
           });
           list.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
           setNotifications(list);
@@ -1053,7 +1094,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   // Auth Operations
   const login = (email: string, password?: string) => {
     const trimmed = email.trim().toLowerCase();
-    const user = users.find((u) => u.email.toLowerCase() === trimmed);
+    const user = users.find((u) => u.email.trim().toLowerCase() === trimmed);
 
     if (!user) {
       return {
@@ -1077,6 +1118,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       };
     }
 
+    try {
+      localStorage.setItem(STORAGE_KEY_USER_ID, user.id);
+      localStorage.setItem(STORAGE_KEY_AUTH, 'true');
+    } catch (e) {
+      console.warn('Failed saving user auth to localStorage:', e);
+    }
+
     setCurrentUser(user);
     setIsAuthenticated(true);
     addAuditLog('LOGIN', `Pengguna ${user.name} berhasil masuk sebagai ${user.role.toUpperCase()}`);
@@ -1096,6 +1144,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const logout = () => {
     addAuditLog('LOGOUT', `Pengguna ${currentUser.name} keluar dari sistem.`);
+    try {
+      localStorage.removeItem(STORAGE_KEY_USER_ID);
+      localStorage.setItem(STORAGE_KEY_AUTH, 'false');
+    } catch (e) {
+      console.warn('Failed clearing user auth from localStorage:', e);
+    }
     setIsAuthenticated(false);
     setShowChangePasswordModal(false);
     setIsPasswordChangeForced(false);
@@ -1329,9 +1383,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   /**
-   * Mengirim data soal ke basis data (Firestore & Google Sheets Sheet 1: Soal_TKAD)
-   * HANYA saat ada aksi perubahan terkait soal dari user:
+   * Mengirim data soal ke basis data utama (Firebase Firestore)
+   * Setiap ada aksi perubahan terkait soal dari pengguna:
    * buat soal, update, submit review, approve, reject, request change, dsb.
+   * Catatan Arsitektur: Data masuk ke Firestore terlebih dahulu sebagai basis data utama.
+   * Pengiriman dari Firestore ke Google Spreadsheets dieksekusi secara berkala tiap 300 detik.
    */
   const syncQuestionActionToDatabase = async (
     actionType: 'CREATE_QUESTION' | 'UPDATE_QUESTION' | 'SUBMIT_REVIEW' | 'APPROVE' | 'REJECT' | 'REQUEST_CHANGES' | 'RECALL' | 'DUPLICATE' | 'DELETE_QUESTION' | 'ROLLBACK',
@@ -1339,7 +1395,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     nextQuestions: Question[],
     customDeletedIds?: string[]
   ) => {
-    // 1. Simpan perubahan ke Firebase Firestore
+    // 1. Simpan seluruh perubahan ke Firebase Firestore sebagai Basis Data Utama
     try {
       if (Array.isArray(questionOrList)) {
         if (actionType === 'DELETE_QUESTION') {
@@ -1362,106 +1418,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       console.warn('Firestore question action sync error:', fsErr);
     }
 
-    // 2. Kirim perubahan ke Google Sheets (Sheet 1: Soal_TKAD) via GAS HANYA pada aksi perubahan dari user ini
-    if (spreadsheetId && gasWebhookUrl) {
-      try {
-        const enrichedQuestions = nextQuestions.map((q) => {
-          const driveLinks = (q.attachments || [])
-            .map((att) => {
-              const fileId = extractDriveFileId(att.url);
-              if (fileId) {
-                return `https://drive.google.com/file/d/${fileId}/view?usp=sharing`;
-              }
-              return att.url;
-            })
-            .filter(Boolean)
-            .join('\n');
-
-          return {
-            ...q,
-            lampiran_media: driveLinks,
-            driveAttachmentUrl: driveLinks,
-            attachmentDriveLinks: driveLinks,
-            attachmentNames: (q.attachments || []).map((a) => a.name).join(', '),
-          };
-        });
-
-        const actionLabels: Record<string, string> = {
-          CREATE_QUESTION: 'Buat Soal',
-          UPDATE_QUESTION: 'Update Soal',
-          SUBMIT_REVIEW: 'Submit Review',
-          APPROVE: 'Approve Soal',
-          REJECT: 'Reject Soal',
-          REQUEST_CHANGES: 'Request Change',
-          RECALL: 'Tarik Draf',
-          DUPLICATE: 'Duplikasi Soal',
-          DELETE_QUESTION: 'Hapus Soal',
-          ROLLBACK: 'Rollback Soal',
-        };
-        const actionLabel = actionLabels[actionType] || actionType;
-
-        const payload = {
-          action: 'PUSH_QUESTION',
-          actionTrigger: actionType,
-          actionLabel,
-          spreadsheetId,
-          questions: enrichedQuestions,
-          users,
-          deletedQuestionIds: customDeletedIds || deletedQuestionIds,
-          auditLogs: auditLogs.slice(0, 30),
-          timestamp: new Date().toISOString(),
-        };
-
-        let pushSucceeded = false;
-        let responseMsg = '';
-
-        // Prioritas 1: Server proxy /api/gas-sync
-        try {
-          const proxyRes = await fetch('/api/gas-sync', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              webhookUrl: gasWebhookUrl,
-              payload,
-            }),
-          });
-          if (proxyRes.ok) {
-            const json = await proxyRes.json();
-            if (json.success) {
-              pushSucceeded = true;
-              responseMsg = json.message || `Aksi ${actionLabel} berhasil dikirim ke Google Sheets (Soal_TKAD).`;
-            }
-          }
-        } catch (proxyErr) {
-          console.warn('Proxy /api/gas-sync error, using fallback:', proxyErr);
-        }
-
-        // Prioritas 2: Fallback direct mode: no-cors
-        if (!pushSucceeded) {
-          try {
-            await fetch(gasWebhookUrl, {
-              method: 'POST',
-              headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-              body: JSON.stringify(payload),
-              mode: 'no-cors',
-            });
-            pushSucceeded = true;
-            responseMsg = `Aksi ${actionLabel} berhasil dikirim ke Google Apps Script (Soal_TKAD).`;
-          } catch (directErr) {
-            console.warn('Direct fetch error:', directErr);
-          }
-        }
-
-        if (pushSucceeded) {
-          const timeStr = new Date().toLocaleTimeString('id-ID');
-          setLastGasSyncTime(timeStr);
-          setSyncStatus('success');
-          setSyncMessage(responseMsg);
-        }
-      } catch (sheetsErr) {
-        console.warn('Google Sheets action sync error:', sheetsErr);
-      }
-    }
+    // Perubahan data sudah tersimpan aman di Firestore (basis data utama).
+    // Sinkronisasi ke Google Spreadsheets akan dilakukan berkala setiap 300 detik dari Firestore
+    // atau pengguna dapat menekan 'Sinkronkan Sekarang' kapan saja.
   };
 
   // Question CRUD & Workflows
@@ -1559,7 +1518,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         let nextVersion = q.version;
         if (isApproved) {
           const [major] = q.version.split('.').map(Number);
-          nextVersion = `${major + 1}.0`;
+          nextVersion = `${(major || 1) + 1}.0`;
+        } else if (submitForReview && (q.status === 'perlu_revisi' || q.status === 'ditolak')) {
+          const parts = q.version.split('.').map(Number);
+          const major = parts[0] || 1;
+          const minor = (parts[1] || 0) + 1;
+          nextVersion = `${major}.${minor}`;
         }
 
         const newStatus = submitForReview ? 'menunggu_review' : isApproved ? 'draft' : q.status;
@@ -1572,13 +1536,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             changeSummary: isApproved
               ? `Revisi dari versi ${q.version} (versi disetujui)`
               : submitForReview
-              ? 'Pembaruan dan pengajuan ulang review'
+              ? `Pembaruan dan pengajuan ulang review (v${nextVersion})`
               : 'Pembaruan draf/revisi',
             snapshot: {
-              prompt: q.prompt,
-              status: q.status,
-              options: q.options,
-              version: q.version,
+              prompt: data.prompt !== undefined ? data.prompt : q.prompt,
+              status: newStatus,
+              options: data.options !== undefined ? data.options : q.options,
+              version: nextVersion,
             },
           },
           ...q.versions,
@@ -1587,6 +1551,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         const updated: Question = {
           ...q,
           ...data,
+          topic: data.topic || data.element || q.topic,
+          element: data.element || data.topic || q.element || q.topic,
+          subElement: data.subElement !== undefined ? data.subElement : q.subElement,
+          competency: data.competency !== undefined ? data.competency : q.competency,
+          cognitiveLevel: data.cognitiveLevel || q.cognitiveLevel,
+          subtest: data.subtest || q.subtest,
+          difficulty: data.difficulty || q.difficulty,
+          defaultScore: data.defaultScore !== undefined ? data.defaultScore : q.defaultScore,
+          tags: data.tags && data.tags.length > 0 ? data.tags : q.tags,
+          packetIds: data.packetIds || q.packetIds || [],
           status: newStatus,
           version: nextVersion,
           updatedAt: new Date().toISOString(),
@@ -1625,14 +1599,23 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
 
     if (submitForReview) {
-      const reviewer = users.find((u) => u.role === 'reviewer');
-      addNotification(
-        reviewer ? reviewer.id : 'usr-2',
-        'Pengajuan Ulang / Soal Siap Direview',
-        `${currentUser.name} memperbarui soal ${id} dan mengajukannya untuk review.`,
-        'info',
-        id
-      );
+      // Notify all reviewers as well as previous reviewer
+      const reviewers = users.filter((u) => u.role === 'reviewer' || u.roles?.includes('reviewer'));
+      const prevReviewerId = (oldQ as Question | null)?.reviews?.[0]?.reviewerId;
+      const targetIds = new Set<string>();
+      if (prevReviewerId) targetIds.add(prevReviewerId);
+      reviewers.forEach((r) => targetIds.add(r.id));
+      if (targetIds.size === 0) targetIds.add('all');
+
+      targetIds.forEach((reviewerId) => {
+        addNotification(
+          reviewerId,
+          'Hasil Revisi Soal Masuk ke Antrian Review',
+          `${currentUser.name} telah mengirimkan perbaikan revisi soal ${(oldQ as Question | null)?.code || id} (v${(updatedQ as Question | null)?.version || '1.1'}). Soal siap ditelaah kembali.`,
+          'info',
+          id
+        );
+      });
     }
   };
 
@@ -2138,13 +2121,22 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const markNotificationRead = (id: string) => {
-    setNotifications((prev) => prev.filter((n) => n.id !== id));
-    removeNotifFromFirestore(id);
+    setNotifications((prev) =>
+      prev.map((n) => (n.id === id ? { ...n, read: true } : n))
+    );
+    const target = notifications.find((n) => n.id === id);
+    if (target) {
+      syncNotifToFirestore({ ...target, read: true });
+    }
   };
 
   const markAllNotificationsRead = () => {
-    notifications.forEach((n) => removeNotifFromFirestore(n.id));
-    setNotifications([]);
+    setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
+    notifications.forEach((n) => {
+      if (!n.read) {
+        syncNotifToFirestore({ ...n, read: true });
+      }
+    });
   };
 
   const deleteNotification = (id: string) => {
@@ -2222,11 +2214,23 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             });
 
             if (importedQuestions.length > 0) {
+              // Simpan setiap butir soal ke Firestore terlebih dahulu sebagai basis data utama
+              for (const q of importedQuestions) {
+                try {
+                  await setDoc(doc(db, 'questions', q.id), sanitizeForFirestore(q));
+                } catch (fsErr) {
+                  console.warn('Gagal menyimpan butir soal ke Firestore:', fsErr);
+                }
+              }
               setQuestions((prev) => mergeQuestions(prev, importedQuestions));
               const timeStr = new Date().toLocaleTimeString('id-ID');
               setLastGasSyncTime(timeStr);
               setSyncStatus('success');
-              const msg = `Berhasil memuat ${importedQuestions.length} butir soal dari basis data Spreadsheet via Apps Script.`;
+              addAuditLog(
+                'SYNC_GAS',
+                `Tarik data Google Sheets sukses: ${importedQuestions.length} butir soal disimpan ke Firestore (basis data utama).`
+              );
+              const msg = `Berhasil memuat ${importedQuestions.length} butir soal dari basis data Spreadsheet dan tersimpan ke Firestore (basis data utama).`;
               setSyncMessage(msg);
               return { success: true, message: msg, count: importedQuestions.length };
             }
@@ -2268,8 +2272,20 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       setSyncStatus('success');
 
       if (parsedQuestions.length > 0) {
+        // Simpan setiap butir soal ke Firestore (basis data utama)
+        for (const q of parsedQuestions) {
+          try {
+            await setDoc(doc(db, 'questions', q.id), sanitizeForFirestore(q));
+          } catch (fsErr) {
+            console.warn('Gagal menyimpan butir soal GViz ke Firestore:', fsErr);
+          }
+        }
         setQuestions((prev) => mergeQuestions(prev, parsedQuestions));
-        const msg = `Sinkronisasi berhasil: ${parsedQuestions.length} butir soal termuat dari basis data Spreadsheet (ID: ${spreadsheetId.slice(0, 8)}...).`;
+        addAuditLog(
+          'SYNC_GAS',
+          `Tarik data Google Sheets (GViz) sukses: ${parsedQuestions.length} butir soal disimpan ke Firestore (basis data utama).`
+        );
+        const msg = `Sinkronisasi berhasil: ${parsedQuestions.length} butir soal termuat dari Spreadsheet dan disimpan ke Firestore (basis data utama).`;
         setSyncMessage(msg);
         return { success: true, message: msg, count: parsedQuestions.length };
       }
@@ -2344,7 +2360,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             const json = await proxyRes.json();
             if (json.success) {
               pushSucceeded = true;
-              responseMsg = json.message || `Data (${questions.length} butir soal, ${users.length} pengguna) berhasil dikirim otomatis ke Google Spreadsheet via GAS.`;
+              responseMsg = json.message || `Data (${questions.length} butir soal dari Firestore) berhasil dikirim ke Google Spreadsheet via GAS.`;
             }
           }
         } catch (proxyErr) {
@@ -2361,7 +2377,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
               mode: 'no-cors',
             });
             pushSucceeded = true;
-            responseMsg = `Perubahan data (${questions.length} butir soal, ${users.length} pengguna) berhasil dikirim otomatis ke Google Apps Script.`;
+            responseMsg = `Perubahan data (${questions.length} butir soal dari Firestore) berhasil dikirim ke Google Apps Script.`;
           } catch (directErr: any) {
             console.warn('Direct fallback error:', directErr);
           }
@@ -2370,8 +2386,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         if (pushSucceeded) {
           const timeStr = new Date().toLocaleTimeString('id-ID');
           setLastGasSyncTime(timeStr);
+          setSheetsSyncCountdown(SHEETS_SYNC_INTERVAL_SECONDS);
           setSyncStatus('success');
           setSyncMessage(responseMsg);
+          if (!options?.silent) {
+            addAuditLog(
+              'SYNC_GAS',
+              `Kirim data dari Firestore ke Google Sheets sukses: ${questions.length} butir soal.`
+            );
+          }
           return { success: true, message: responseMsg };
         }
       }
@@ -2382,10 +2405,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
       const timeStr = new Date().toLocaleTimeString('id-ID');
       setLastGasSyncTime(timeStr);
+      setSheetsSyncCountdown(SHEETS_SYNC_INTERVAL_SECONDS);
       setSyncStatus('success');
       const msg = gasWebhookUrl
-        ? `Tersinkron otomatis (${questions.length} butir soal, ${users.length} pengguna) ke basis data Spreadsheet ID: ${spreadsheetId.slice(0, 10)}...`
-        : `Basis data Spreadsheet terhubung (ID: ${spreadsheetId.slice(0, 10)}...). Silakan pastikan Web App URL diatur agar perubahan data terkirim langsung.`;
+        ? `Tersinkron otomatis (${questions.length} butir soal) dari Firestore ke Google Sheets (ID: ${spreadsheetId.slice(0, 10)}...).`
+        : `Basis data Spreadsheet terhubung (ID: ${spreadsheetId.slice(0, 10)}...). Pastikan Web App URL diatur agar pengiriman otomatis 300s berjalan.`;
       setSyncMessage(msg);
       return { success: true, message: msg };
     } catch (err: any) {
@@ -2399,6 +2423,31 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
     }
   };
+
+  // Google Sheets Auto-Sync every 300 seconds from Firestore (Basis Data Utama)
+  const syncWithGoogleSheetsRef = useRef(syncWithGoogleSheets);
+  syncWithGoogleSheetsRef.current = syncWithGoogleSheets;
+
+  useEffect(() => {
+    if (!autoSyncEnabled) return;
+
+    const intervalTimer = setInterval(() => {
+      setSheetsSyncCountdown((prev) => {
+        if (prev <= 1) {
+          // Timer 300 detik tercapai: kirim data dari Firestore ke Google Sheets
+          if (spreadsheetId && gasWebhookUrl) {
+            syncWithGoogleSheetsRef.current({ silent: true }).catch((err) => {
+              console.warn('Periodic 300s sync error:', err);
+            });
+          }
+          return SHEETS_SYNC_INTERVAL_SECONDS;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+
+    return () => clearInterval(intervalTimer);
+  }, [autoSyncEnabled, spreadsheetId, gasWebhookUrl]);
 
   // CATATAN: Sinkronisasi otomatis (interval 60 detik & debounced auto-push) untuk Bank Soal (Sheet 1: Soal_TKAD) telah dinonaktifkan.
   // Pengiriman data soal ke basis data kini HANYA dipicu saat ada aksi perubahan terkait soal dari pengguna
@@ -2989,6 +3038,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         lastGasSyncTime,
         syncWithGoogleSheets,
         pullFromGoogleSheets,
+        sheetsSyncCountdown,
+        sheetsSyncInterval: SHEETS_SYNC_INTERVAL_SECONDS,
+        triggerImmediateSheetsSync: () => syncWithGoogleSheets({ silent: false }),
         dualSyncStatus,
         isDualSyncing,
         lastDualSyncTime,

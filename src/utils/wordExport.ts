@@ -968,7 +968,7 @@ export async function exportQuestionsToWord(
             indent: { left: convertInchesToTwip(0.4) },
             children: [
               new TextRun({
-                text: `📁 [Lampiran Gambar/Media: ${att.name}${att.size ? ` - ${att.size}` : ''}]  `,
+                text: `📁 [Lampiran Gambar/Media: ${att.source ? `Sumber: ${att.source}` : att.name}${att.size ? ` - ${att.size}` : ''}]  `,
                 italics: true,
                 bold: true,
                 size: 19,

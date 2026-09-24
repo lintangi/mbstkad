@@ -15,10 +15,15 @@ import {
   Calendar,
   Layers,
   Sparkles,
+  Square,
+  Table as TableIcon,
+  Tag,
+  BookOpen,
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { LatexRenderer } from '../utils/latexParser';
 import { normalizeGoogleDriveImageUrl, handleDriveImageError } from '../utils/googleDriveUtils';
+import { QuestionPromptViewer } from './QuestionPromptViewer';
 
 export const QuestionDetailModal: React.FC = () => {
   const {
@@ -39,7 +44,7 @@ export const QuestionDetailModal: React.FC = () => {
   if (!question) return null;
 
   const isAuthor = currentUser.id === question.createdById || currentUser.role === 'pembuat';
-  const isReviewer = currentUser.role === 'reviewer';
+  const isReviewer = currentUser.role === 'reviewer' || currentUser.role === 'admin' || currentUser.roles?.includes('reviewer');
   const isAdmin = currentUser.role === 'admin';
 
   const getStatusBadge = (status: string) => {
@@ -167,23 +172,64 @@ export const QuestionDetailModal: React.FC = () => {
         {/* Modal Body */}
         <div className="p-6 max-h-[70vh] overflow-y-auto space-y-6">
           {/* Metadata pill cards */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
-            <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-700">
-              <span className="text-[10px] uppercase font-bold text-slate-400 dark:text-slate-500 block">Subtes / Mapel</span>
-              <span className="font-semibold text-slate-800 dark:text-white">{question.subtest}</span>
+          <div className="space-y-3">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+              <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-700">
+                <span className="text-[10px] uppercase font-bold text-slate-400 dark:text-slate-500 block">Subtes / Mapel</span>
+                <span className="font-semibold text-slate-800 dark:text-white">{question.subtest}</span>
+              </div>
+              <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-700">
+                <span className="text-[10px] uppercase font-bold text-slate-400 dark:text-slate-500 block">1. Elemen / Topik</span>
+                <span className="font-semibold text-slate-800 dark:text-white">{question.element || question.topic || 'Umum'}</span>
+              </div>
+              <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-700">
+                <span className="text-[10px] uppercase font-bold text-slate-400 dark:text-slate-500 block">Tingkat Kesulitan</span>
+                <span className="font-semibold text-slate-800 dark:text-white capitalize">{question.difficulty}</span>
+              </div>
+              <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-700">
+                <span className="text-[10px] uppercase font-bold text-slate-400 dark:text-slate-500 block">Bobot Skor & Versi</span>
+                <span className="font-semibold text-slate-800 dark:text-white">{question.defaultScore} Poin • v{question.version}</span>
+              </div>
             </div>
-            <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-700">
-              <span className="text-[10px] uppercase font-bold text-slate-400 dark:text-slate-500 block">Topik</span>
-              <span className="font-semibold text-slate-800 dark:text-white">{question.topic}</span>
-            </div>
-            <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-700">
-              <span className="text-[10px] uppercase font-bold text-slate-400 dark:text-slate-500 block">Tingkat Kesulitan</span>
-              <span className="font-semibold text-slate-800 dark:text-white capitalize">{question.difficulty}</span>
-            </div>
-            <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-700">
-              <span className="text-[10px] uppercase font-bold text-slate-400 dark:text-slate-500 block">Bobot Skor Default</span>
-              <span className="font-semibold text-slate-800 dark:text-white">{question.defaultScore} Poin</span>
-            </div>
+
+            {/* Extended Metadata: Sub-Elemen, Kompetensi, Level Kognitif, Tags */}
+            {(question.subElement || question.competency || question.cognitiveLevel || (question.tags && question.tags.length > 0)) && (
+              <div className="p-3.5 rounded-xl bg-slate-50/70 dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-700/80 text-xs space-y-2">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  {question.subElement && (
+                    <div>
+                      <span className="text-[10px] uppercase font-bold text-slate-400 dark:text-slate-500 block">2. Sub Elemen</span>
+                      <span className="text-slate-800 dark:text-slate-200 font-medium">{question.subElement}</span>
+                    </div>
+                  )}
+                  {question.cognitiveLevel && (
+                    <div>
+                      <span className="text-[10px] uppercase font-bold text-slate-400 dark:text-slate-500 block">4. Level Kognitif</span>
+                      <span className="text-slate-800 dark:text-slate-200 font-medium">{question.cognitiveLevel}</span>
+                    </div>
+                  )}
+                  {question.tags && question.tags.length > 0 && (
+                    <div>
+                      <span className="text-[10px] uppercase font-bold text-slate-400 dark:text-slate-500 block mb-1">Tags / Kata Kunci</span>
+                      <div className="flex flex-wrap gap-1">
+                        {question.tags.map((t) => (
+                          <span key={t} className="px-2 py-0.5 rounded-md bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 text-[10px] text-slate-600 dark:text-slate-300 font-medium">
+                            #{t}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {question.competency && (
+                  <div className="pt-1.5 border-t border-slate-200/60 dark:border-slate-700/60">
+                    <span className="text-[10px] uppercase font-bold text-slate-400 dark:text-slate-500 block mb-0.5">3. Kompetensi (Indikator Soal)</span>
+                    <p className="text-slate-700 dark:text-slate-300 leading-relaxed italic">{question.competency}</p>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
           {/* TAB 1: CONTENT & ANSWER KEY */}
@@ -191,87 +237,186 @@ export const QuestionDetailModal: React.FC = () => {
             <div className="space-y-6">
               {/* Question Text */}
               <div className="p-5 rounded-2xl bg-white dark:bg-slate-850 border border-slate-200 dark:border-slate-800 space-y-3">
-                <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500">Teks Pertanyaan</span>
-                <div className="text-base text-slate-900 dark:text-slate-100 leading-relaxed font-sans">
-                  <LatexRenderer content={question.prompt} />
+                <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500">Teks Pokok Soal</span>
+                <div className="text-sm text-slate-900 dark:text-slate-100 leading-relaxed font-sans">
+                  <QuestionPromptViewer prompt={question.prompt} attachments={question.attachments} />
                 </div>
-
-                {question.attachments.length > 0 && (
-                  <div className="pt-3 border-t border-slate-100 dark:border-slate-800 space-y-4">
-                    {question.attachments.map((att) => {
-                      const alignClass = 
-                        att.align === 'left' ? 'text-left' :
-                        att.align === 'right' ? 'text-right' :
-                        'text-center';
-
-                      const alignImgClass = 
-                        att.align === 'left' ? 'mr-auto ml-0' :
-                        att.align === 'right' ? 'ml-auto mr-0' :
-                        'mx-auto';
-
-                      const widthStyle = att.width ? `${att.width}%` : '100%';
-                      const resolvedUrl = normalizeGoogleDriveImageUrl(att.url);
-
-                      return (
-                        <div key={att.id} className={alignClass}>
-                          <img
-                            src={resolvedUrl}
-                            alt={att.name}
-                            referrerPolicy="no-referrer"
-                            crossOrigin="anonymous"
-                            loading="lazy"
-                            style={{ width: widthStyle }}
-                            className={`max-h-80 rounded-lg border border-slate-200 dark:border-slate-700 object-contain shadow-2xs ${alignImgClass}`}
-                            onError={(e) => handleDriveImageError(e, att.url)}
-                          />
-                          <span className="text-[11px] text-slate-500 dark:text-slate-400 mt-1 block italic">{att.name}</span>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
               </div>
 
               {/* Specific Answer Keys by Type */}
               <div className="p-5 rounded-2xl bg-white dark:bg-slate-850 border border-slate-200 dark:border-slate-800 space-y-3">
-                <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500">
-                  Struktur Jawaban & Kunci ({question.type.replace(/_/g, ' ').toUpperCase()})
-                </span>
+                <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-2">
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500">
+                    Struktur Jawaban & Kunci ({question.type.replace(/_/g, ' ').toUpperCase()})
+                  </span>
+                  {question.type === 'pilihan_ganda_kompleks' && (
+                    <span className="text-[11px] font-bold text-emerald-700 dark:text-emerald-300 flex items-center space-x-1">
+                      <Square className="w-3.5 h-3.5 fill-emerald-600 text-emerald-600" />
+                      <span>Format Check Box (Tanpa a, b, c, d)</span>
+                    </span>
+                  )}
+                  {question.type === 'benar_salah' && (
+                    <span className="text-[11px] font-bold text-blue-700 dark:text-blue-300 flex items-center space-x-1">
+                      <TableIcon className="w-3.5 h-3.5" />
+                      <span>Format Tabel Terstruktur</span>
+                    </span>
+                  )}
+                </div>
 
-                {/* Multiple Choice (Single / Complex) */}
-                {question.options && question.options.length > 0 && (
+                {/* 1. Pilihan Ganda Tunggal */}
+                {question.type === 'pilihan_ganda' && question.options && question.options.length > 0 && (
                   <div className="space-y-2">
                     {question.options.map((opt) => (
                       <div
                         key={opt.id}
-                        className={`p-3 rounded-xl border flex items-start space-x-3 text-xs ${
+                        className={`p-3 rounded-xl border flex flex-col space-y-2 text-xs ${
                           opt.isCorrect
                             ? 'bg-emerald-50 dark:bg-emerald-950/40 border-emerald-300 dark:border-emerald-700 ring-1 ring-emerald-200 dark:ring-emerald-800'
                             : 'bg-slate-50 dark:bg-slate-800 border-slate-200 dark:border-slate-700'
                         }`}
                       >
-                        <div
-                          className={`w-6 h-6 rounded-lg font-bold flex items-center justify-center text-xs shrink-0 ${
-                            opt.isCorrect
-                              ? 'bg-emerald-600 text-white'
-                              : 'bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-200'
-                          }`}
-                        >
-                          {opt.label}
+                        <div className="flex items-start space-x-3">
+                          <div
+                            className={`w-6 h-6 rounded-full font-bold flex items-center justify-center text-xs shrink-0 ${
+                              opt.isCorrect
+                                ? 'bg-emerald-600 text-white'
+                                : 'bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-200'
+                            }`}
+                          >
+                            {opt.label}
+                          </div>
+                          <div className="flex-1 text-slate-800 dark:text-slate-200">
+                            <LatexRenderer content={opt.text} />
+                            {opt.isCorrect && (
+                              <span className="text-[10px] font-bold text-emerald-700 dark:text-emerald-400 mt-1 block">
+                                ✓ Kunci Jawaban Benar
+                              </span>
+                            )}
+                            {opt.explanation && (
+                              <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1 italic">{opt.explanation}</p>
+                            )}
+                          </div>
                         </div>
-                        <div className="flex-1 text-slate-800 dark:text-slate-200">
-                          <LatexRenderer content={opt.text} />
-                          {opt.isCorrect && (
-                            <span className="text-[10px] font-bold text-emerald-700 dark:text-emerald-400 mt-1 block">
-                              ✓ Kunci Jawaban Benar
-                            </span>
-                          )}
-                          {opt.explanation && (
-                            <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1 italic">{opt.explanation}</p>
-                          )}
-                        </div>
+                        {opt.imageUrl && (
+                          <div className="pl-9">
+                            <img
+                              src={normalizeGoogleDriveImageUrl(opt.imageUrl)}
+                              alt={`Gambar Opsi ${opt.label}`}
+                              className="max-h-32 rounded-lg border border-slate-200 dark:border-slate-700 object-contain shadow-2xs"
+                              onError={(e) => handleDriveImageError(e, opt.imageUrl!)}
+                            />
+                          </div>
+                        )}
                       </div>
                     ))}
+                  </div>
+                )}
+
+                {/* 2. Pilihan Ganda Kompleks (STRICTLY CHECKBOX WITHOUT A, B, C, D) */}
+                {question.type === 'pilihan_ganda_kompleks' && question.options && question.options.length > 0 && (
+                  <div className="space-y-2">
+                    {question.options.map((opt, idx) => (
+                      <div
+                        key={opt.id}
+                        className={`p-3 rounded-xl border-2 flex flex-col space-y-2 text-xs ${
+                          opt.isCorrect
+                            ? 'bg-emerald-50 dark:bg-emerald-950/40 border-emerald-500 dark:border-emerald-600 shadow-2xs'
+                            : 'bg-slate-50 dark:bg-slate-800 border-slate-300 dark:border-slate-700'
+                        }`}
+                      >
+                        <div className="flex items-start space-x-3">
+                          {/* Square Checkbox Indicator without A, B, C, D */}
+                          <div
+                            className={`w-6 h-6 rounded-md border-2 font-bold flex items-center justify-center text-xs shrink-0 ${
+                              opt.isCorrect
+                                ? 'bg-emerald-600 border-emerald-700 text-white'
+                                : 'bg-white dark:bg-slate-800 border-slate-400 dark:border-slate-600'
+                            }`}
+                          >
+                            {opt.isCorrect && <span>✓</span>}
+                          </div>
+                          <div className="flex-1 text-slate-800 dark:text-slate-200">
+                            <LatexRenderer content={opt.text} />
+                            {opt.isCorrect && (
+                              <span className="text-[10px] font-bold text-emerald-700 dark:text-emerald-400 mt-1 block">
+                                ✓ Kunci Jawaban Benar (Centang)
+                              </span>
+                            )}
+                            {opt.explanation && (
+                              <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1 italic">{opt.explanation}</p>
+                            )}
+                          </div>
+                        </div>
+                        {opt.imageUrl && (
+                          <div className="pl-9">
+                            <img
+                              src={normalizeGoogleDriveImageUrl(opt.imageUrl)}
+                              alt="Gambar Opsi"
+                              className="max-h-32 rounded-lg border border-slate-200 dark:border-slate-700 object-contain shadow-2xs"
+                              onError={(e) => handleDriveImageError(e, opt.imageUrl!)}
+                            />
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* 3. Benar / Salah (FORMAT TABEL DI SEMUA ROLE) */}
+                {question.type === 'benar_salah' && question.trueFalseItems && question.trueFalseItems.length > 0 && (
+                  <div className="overflow-x-auto border border-slate-200 dark:border-slate-700 rounded-xl bg-white dark:bg-slate-900 shadow-2xs">
+                    <table className="w-full text-left border-collapse text-xs">
+                      <thead>
+                        <tr className="bg-slate-100 dark:bg-slate-800/80 text-slate-700 dark:text-slate-200 border-b border-slate-200 dark:border-slate-700">
+                          <th className="py-2.5 px-3 font-bold w-12 text-center">No</th>
+                          <th className="py-2.5 px-3 font-bold">Pernyataan Evaluasi</th>
+                          <th className="py-2.5 px-3 font-bold w-24 text-center bg-emerald-50/50 dark:bg-emerald-950/30 text-emerald-800 dark:text-emerald-300 border-l border-slate-200 dark:border-slate-700">
+                            Benar (B)
+                          </th>
+                          <th className="py-2.5 px-3 font-bold w-24 text-center bg-rose-50/50 dark:bg-rose-950/30 text-rose-800 dark:text-rose-300 border-l border-slate-200 dark:border-slate-700">
+                            Salah (S)
+                          </th>
+                          <th className="py-2.5 px-3 font-bold w-28 text-center border-l border-slate-200 dark:border-slate-700">
+                            Kunci Valid
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                        {question.trueFalseItems.map((tf, idx) => (
+                          <tr key={tf.id || idx} className="hover:bg-slate-50/70 dark:hover:bg-slate-850/70">
+                            <td className="py-2.5 px-3 text-center font-bold text-slate-500 dark:text-slate-400">
+                              {idx + 1}
+                            </td>
+                            <td className="py-2.5 px-3 text-slate-800 dark:text-slate-200">
+                              <LatexRenderer content={tf.statement} />
+                            </td>
+                            <td className="py-2.5 px-3 text-center border-l border-slate-200 dark:border-slate-700 bg-emerald-50/20 dark:bg-emerald-950/20">
+                              {tf.correctAnswer ? (
+                                <span className="inline-block w-6 h-6 rounded-full bg-emerald-600 text-white font-bold text-xs leading-6">✓</span>
+                              ) : (
+                                <span className="text-slate-300 dark:text-slate-600">-</span>
+                              )}
+                            </td>
+                            <td className="py-2.5 px-3 text-center border-l border-slate-200 dark:border-slate-700 bg-rose-50/20 dark:bg-rose-950/20">
+                              {!tf.correctAnswer ? (
+                                <span className="inline-block w-6 h-6 rounded-full bg-rose-600 text-white font-bold text-xs leading-6">✓</span>
+                              ) : (
+                                <span className="text-slate-300 dark:text-slate-600">-</span>
+                              )}
+                            </td>
+                            <td className="py-2.5 px-3 text-center border-l border-slate-200 dark:border-slate-700 font-bold">
+                              <span className={`px-2.5 py-1 rounded-md text-[11px] font-bold ${
+                                tf.correctAnswer
+                                  ? 'bg-emerald-100 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300'
+                                  : 'bg-rose-100 dark:bg-rose-950/60 text-rose-800 dark:text-rose-300'
+                              }`}>
+                                {tf.correctAnswer ? 'BENAR' : 'SALAH'}
+                              </span>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
                   </div>
                 )}
 
@@ -364,66 +509,136 @@ export const QuestionDetailModal: React.FC = () => {
                 </span>
               </div>
 
-              {/* Question Text */}
+              {/* Question Text with QuestionPromptViewer */}
               <div className="text-slate-100 text-base leading-relaxed">
-                <LatexRenderer content={question.prompt} className="text-slate-100" />
-                {question.attachments && question.attachments.length > 0 && (
-                  <div className="mt-4 space-y-4">
-                    {question.attachments.map((att) => {
-                      const alignClass = 
-                        att.align === 'left' ? 'text-left' :
-                        att.align === 'right' ? 'text-right' :
-                        'text-center';
-
-                      const alignImgClass = 
-                        att.align === 'left' ? 'mr-auto ml-0' :
-                        att.align === 'right' ? 'ml-auto mr-0' :
-                        'mx-auto';
-
-                      const widthStyle = att.width ? `${att.width}%` : '100%';
-                      const resolvedUrl = normalizeGoogleDriveImageUrl(att.url);
-
-                      return (
-                        <div key={att.id} className={alignClass}>
-                          <img
-                            src={resolvedUrl}
-                            alt={att.name}
-                            referrerPolicy="no-referrer"
-                            crossOrigin="anonymous"
-                            loading="lazy"
-                            style={{ width: widthStyle }}
-                            className={`max-h-80 rounded-lg border border-slate-700 object-contain shadow-md ${alignImgClass}`}
-                            onError={(e) => handleDriveImageError(e, att.url)}
-                          />
-                          <span className="text-[11px] text-slate-400 mt-1 block italic">{att.name}</span>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
+                <QuestionPromptViewer prompt={question.prompt} attachments={question.attachments} isExamMode={true} />
               </div>
 
-              {/* Exam Options */}
-              {question.options && question.options.length > 0 && (
+              {/* Exam Options: Pilihan Ganda (Single - Radio Circle with Label) */}
+              {question.type === 'pilihan_ganda' && question.options && question.options.length > 0 && (
                 <div className="space-y-3 pt-2">
                   {question.options.map((opt) => (
                     <label
                       key={opt.id}
-                      className="flex items-center space-x-3 p-3.5 rounded-xl bg-slate-800/80 border border-slate-700/60 hover:bg-slate-700/60 cursor-pointer transition"
+                      className="flex flex-col space-y-2 p-3.5 rounded-xl bg-slate-800/80 border border-slate-700/60 hover:bg-slate-700/60 cursor-pointer transition"
                     >
-                      <input
-                        type={question.type === 'pilihan_ganda' ? 'radio' : 'checkbox'}
-                        name="examAnswer"
-                        className="w-4 h-4 text-blue-500 focus:ring-blue-400 bg-slate-700 border-slate-600"
-                      />
-                      <span className="w-7 h-7 rounded-lg bg-slate-700 flex items-center justify-center font-bold text-xs text-white">
-                        {opt.label}
-                      </span>
-                      <div className="text-slate-200 text-sm">
-                        <LatexRenderer content={opt.text} className="text-slate-200" />
+                      <div className="flex items-center space-x-3">
+                        <input
+                          type="radio"
+                          name="examAnswer"
+                          className="w-4 h-4 text-blue-500 focus:ring-blue-400 bg-slate-700 border-slate-600"
+                        />
+                        <span className="w-7 h-7 rounded-full bg-slate-700 flex items-center justify-center font-bold text-xs text-white shrink-0">
+                          {opt.label}
+                        </span>
+                        <div className="text-slate-200 text-sm flex-1">
+                          <LatexRenderer content={opt.text} className="text-slate-200" />
+                        </div>
                       </div>
+                      {opt.imageUrl && (
+                        <div className="pl-14">
+                          <img
+                            src={normalizeGoogleDriveImageUrl(opt.imageUrl)}
+                            alt={`Opsi ${opt.label}`}
+                            className="max-h-36 rounded-lg border border-slate-700 object-contain shadow-xs"
+                            onError={(e) => handleDriveImageError(e, opt.imageUrl!)}
+                          />
+                        </div>
+                      )}
                     </label>
                   ))}
+                </div>
+              )}
+
+              {/* Exam Options: Pilihan Ganda Kompleks (Multi - STRICT SQUARE CHECKBOX WITHOUT A, B, C, D) */}
+              {question.type === 'pilihan_ganda_kompleks' && question.options && question.options.length > 0 && (
+                <div className="space-y-3 pt-2">
+                  <div className="p-2.5 rounded-xl bg-emerald-950/40 border border-emerald-800/60 text-xs text-emerald-300 flex items-center space-x-2">
+                    <Square className="w-3.5 h-3.5 fill-emerald-500 text-emerald-500 shrink-0" />
+                    <span>Pilihan Ganda Kompleks: Anda dapat memilih lebih dari satu jawaban yang benar (Centang kotak).</span>
+                  </div>
+                  {question.options.map((opt) => (
+                    <label
+                      key={opt.id}
+                      className="flex flex-col space-y-2 p-3.5 rounded-xl bg-slate-800/80 border border-slate-700/60 hover:bg-slate-700/60 cursor-pointer transition"
+                    >
+                      <div className="flex items-center space-x-3.5">
+                        {/* Strictly Checkbox square without A, B, C, D */}
+                        <input
+                          type="checkbox"
+                          name="examAnswerComplex"
+                          className="w-5 h-5 rounded-md text-emerald-500 focus:ring-emerald-400 bg-slate-700 border-slate-500 shrink-0"
+                        />
+                        <div className="text-slate-200 text-sm flex-1">
+                          <LatexRenderer content={opt.text} className="text-slate-200" />
+                        </div>
+                      </div>
+                      {opt.imageUrl && (
+                        <div className="pl-9">
+                          <img
+                            src={normalizeGoogleDriveImageUrl(opt.imageUrl)}
+                            alt="Opsi Jawaban"
+                            className="max-h-36 rounded-lg border border-slate-700 object-contain shadow-xs"
+                            onError={(e) => handleDriveImageError(e, opt.imageUrl!)}
+                          />
+                        </div>
+                      )}
+                    </label>
+                  ))}
+                </div>
+              )}
+
+              {/* Exam Options: Benar / Salah (FORMAT TABEL DI SEMUA ROLE) */}
+              {question.type === 'benar_salah' && question.trueFalseItems && question.trueFalseItems.length > 0 && (
+                <div className="pt-2 space-y-2">
+                  <div className="overflow-x-auto border border-slate-700 rounded-xl bg-slate-850 shadow-md">
+                    <table className="w-full text-left border-collapse text-xs">
+                      <thead>
+                        <tr className="bg-slate-800 text-slate-200 border-b border-slate-700">
+                          <th className="py-3 px-3 font-bold w-12 text-center">No</th>
+                          <th className="py-3 px-3 font-bold">Pernyataan Evaluasi</th>
+                          <th className="py-3 px-4 font-bold w-28 text-center bg-emerald-950/40 text-emerald-300 border-l border-slate-700">
+                            Benar (B)
+                          </th>
+                          <th className="py-3 px-4 font-bold w-28 text-center bg-rose-950/40 text-rose-300 border-l border-slate-700">
+                            Salah (S)
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-750">
+                        {question.trueFalseItems.map((tf, idx) => (
+                          <tr key={tf.id || idx} className="hover:bg-slate-800/60 transition">
+                            <td className="py-3 px-3 text-center font-bold text-slate-400">
+                              {idx + 1}
+                            </td>
+                            <td className="py-3 px-3 text-slate-200">
+                              <LatexRenderer content={tf.statement} />
+                            </td>
+                            <td className="py-3 px-4 text-center border-l border-slate-700 bg-emerald-950/20">
+                              <label className="flex items-center justify-center cursor-pointer">
+                                <input
+                                  type="radio"
+                                  name={`exam_tf_${tf.id || idx}`}
+                                  value="true"
+                                  className="w-4 h-4 text-emerald-500 focus:ring-emerald-400 bg-slate-700 border-slate-600"
+                                />
+                              </label>
+                            </td>
+                            <td className="py-3 px-4 text-center border-l border-slate-700 bg-rose-950/20">
+                              <label className="flex items-center justify-center cursor-pointer">
+                                <input
+                                  type="radio"
+                                  name={`exam_tf_${tf.id || idx}`}
+                                  value="false"
+                                  className="w-4 h-4 text-rose-500 focus:ring-rose-400 bg-slate-700 border-slate-600"
+                                />
+                              </label>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
                 </div>
               )}
 
@@ -595,17 +810,22 @@ export const QuestionDetailModal: React.FC = () => {
               </button>
             )}
 
-            {/* Reviewer Action Button */}
-            {isReviewer && question.status === 'menunggu_review' && (
+            {/* Reviewer Action Button: Available whenever reviewer/admin wants to review or re-evaluate */}
+            {isReviewer && (
               <button
                 onClick={() => {
                   setReviewingQuestionId(question.id);
                   setSelectedQuestionId(null);
                 }}
-                className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold shadow-sm transition flex items-center space-x-1.5 cursor-pointer"
+                className={`px-4 py-2 rounded-xl text-white text-xs font-semibold shadow-sm transition flex items-center space-x-1.5 cursor-pointer ${
+                  question.status === 'menunggu_review'
+                    ? 'bg-blue-600 hover:bg-blue-700'
+                    : 'bg-emerald-600 hover:bg-emerald-700'
+                }`}
+                title="Buka form telaah untuk menyetujui, meminta revisi, atau menolak butir soal"
               >
                 <CheckCircle2 className="w-3.5 h-3.5" />
-                <span>Mulai Telaah Soal Ini</span>
+                <span>{question.status === 'menunggu_review' ? 'Mulai Telaah Soal Ini' : 'Telaah Ulang / Evaluasi Mutu'}</span>
               </button>
             )}
 

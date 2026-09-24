@@ -38,6 +38,7 @@ export const Navbar: React.FC = () => {
     lastGasSyncTime,
     spreadsheetId,
     autoSyncEnabled,
+    sheetsSyncCountdown,
     setSelectedQuestionId,
     questions,
     theme,

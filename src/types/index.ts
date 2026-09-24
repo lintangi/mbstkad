@@ -37,6 +37,7 @@ export interface ChoiceOption {
   label: string; // 'A', 'B', 'C', 'D', 'E'
   text: string;
   isCorrect: boolean;
+  imageUrl?: string; // Optional image for this choice option
   explanation?: string;
   feedback?: string; // reviewer feedback on this choice
 }
@@ -82,11 +83,13 @@ export interface QuestionVersion {
 export interface QuestionAttachment {
   id: string;
   name: string;
+  source?: string; // Sumber / Keterangan media (input manual)
   type: 'image' | 'audio' | 'document';
   url: string;
   size?: string;
-  width?: number; // percentage (e.g. 50, 75, 100)
+  width?: number; // percentage (e.g. 25, 50, 75, 100)
   align?: 'left' | 'center' | 'right';
+  position?: 'top' | 'middle' | 'bottom'; // Posisi penempatan gambar dalam soal
 }
 
 export interface Question {
